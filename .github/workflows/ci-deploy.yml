@@ -1,0 +1,64 @@
+name: ci-deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+      - name: Migration smoke test
+        env:
+          DMP_DATABASE_URL: sqlite:///data/ci-migration.db
+        run: mkdir -p data && alembic upgrade head
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - working-directory: frontend
+        run: pnpm install --frozen-lockfile && pnpm build
+      - run: docker compose config --quiet
+      - name: Reject committed runtime secrets
+        shell: bash
+        run: |
+          ! git ls-files | grep -E '(^|/)(\.env|.*\.pem|id_rsa|id_ed25519)$'
+          ! git grep -nE '(gho_|github_pat_|BEGIN (RSA |OPENSSH )?PRIVATE KEY)' -- . ':!*.lock'
+
+  deploy:
+    needs: test
+    if: ${{ github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure SSH
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_HOST_KEY: ${{ secrets.SERVER_HOST_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SERVER_HOST_KEY" > ~/.ssh/known_hosts
+      - name: Deploy fixed commit
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          ssh "$SERVER_USER@$SERVER_HOST" "cd /ai_cjtz && DEPLOY_SHA='$DEPLOY_SHA' bash scripts/deploy.sh"

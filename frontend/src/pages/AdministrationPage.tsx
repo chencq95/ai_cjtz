@@ -1,0 +1,21 @@
+import { App, Button, Card, Form, Input, Modal, Select, Space, Switch, Table, Tabs, Tag } from 'antd'
+import { CheckOutlined, PlusOutlined } from '@ant-design/icons'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import dayjs from 'dayjs'
+import { api, patch, post } from '../api'
+import type { User } from '../types'
+
+export default function AdministrationPage({user}:{user:User}) {
+  const [userOpen,setUserOpen]=useState(false);const [form]=Form.useForm();const client=useQueryClient();const {message}=App.useApp()
+  const users=useQuery<any[]>({queryKey:['users'],queryFn:()=>api('/v1/users'),enabled:user.role==='admin'})
+  const audit=useQuery<any>({queryKey:['audit'],queryFn:()=>api('/v1/audit'),enabled:user.role==='admin'})
+  const alerts=useQuery<any[]>({queryKey:['alerts','all'],queryFn:()=>api('/v1/alerts')})
+  const create=useMutation({mutationFn:(body:any)=>post('/v1/users',body),onSuccess:()=>{message.success('用户已创建');setUserOpen(false);client.invalidateQueries({queryKey:['users']})},onError:(e:Error)=>message.error(e.message)})
+  const ack=useMutation({mutationFn:(id:number)=>post(`/v1/alerts/${id}/ack`),onSuccess:()=>client.invalidateQueries({queryKey:['alerts']}),onError:(e:Error)=>message.error(e.message)})
+  if(user.role!=='admin')return <Card><Tag color="blue">只读用户</Tag> 当前账号不能查看用户和审计配置。</Card>
+  const userTable=<><div style={{textAlign:'right',marginBottom:12}}><Button type="primary" icon={<PlusOutlined/>} onClick={()=>{form.resetFields();form.setFieldsValue({role:'readonly'});setUserOpen(true)}}>新建用户</Button></div><Table rowKey="id" dataSource={users.data||[]} columns={[{title:'用户名',dataIndex:'username'},{title:'角色',dataIndex:'role',render:(v:string)=><Tag color={v==='admin'?'purple':'blue'}>{v}</Tag>},{title:'启用',dataIndex:'enabled',render:(v:boolean)=><Switch checked={v} disabled size="small"/>},{title:'必须改密',dataIndex:'must_change_password',render:(v:boolean)=>v?'是':'否'},{title:'最近登录',dataIndex:'last_login_at',render:(v:string)=>v?dayjs(v).format('YYYY-MM-DD HH:mm'):'从未登录'}]}/></>
+  const auditTable=<Table rowKey="id" dataSource={audit.data?.items||[]} columns={[{title:'时间',dataIndex:'created_at',render:(v:string)=>dayjs(v).format('MM-DD HH:mm:ss')},{title:'用户',dataIndex:'username'},{title:'操作',dataIndex:'action',render:(v:string)=><Tag>{v}</Tag>},{title:'资源',render:(_:unknown,r:any)=>`${r.resource_type}:${r.resource_id}`},{title:'来源 IP',dataIndex:'ip_address'},{title:'详情',dataIndex:'detail',render:(v:any)=><span className="mono">{JSON.stringify(v).slice(0,80)}</span>}]} />
+  const alertTable=<Table rowKey="id" dataSource={alerts.data||[]} columns={[{title:'级别',dataIndex:'severity',render:(v:string)=><Tag color={v==='error'?'red':'gold'}>{v}</Tag>},{title:'告警',dataIndex:'title'},{title:'类型',dataIndex:'type'},{title:'说明',dataIndex:'message',ellipsis:true},{title:'时间',dataIndex:'created_at',render:(v:string)=>dayjs(v).format('MM-DD HH:mm')},{title:'操作',render:(_:unknown,r:any)=><Button size="small" icon={<CheckOutlined/>} onClick={()=>ack.mutate(r.id)}>确认</Button>}]} />
+  return <><div className="page-head"><div><h1>用户、告警与审计</h1><p>管理员和只读权限、站内告警以及所有配置变更留痕</p></div></div><Card className="panel-card"><Tabs items={[{key:'alerts',label:`站内告警 (${alerts.data?.length||0})`,children:alertTable},{key:'users',label:'用户管理',children:userTable},{key:'audit',label:'审计日志',children:auditTable}]}/></Card><Modal title="新建用户" open={userOpen} onCancel={()=>setUserOpen(false)} onOk={()=>form.validateFields().then(v=>create.mutate(v))} confirmLoading={create.isPending}><Form form={form} layout="vertical"><Form.Item name="username" label="用户名" rules={[{required:true,min:3}]}><Input/></Form.Item><Form.Item name="password" label="初始密码" rules={[{required:true,min:10}]}><Input.Password/></Form.Item><Form.Item name="role" label="角色"><Select options={[{value:'readonly',label:'只读用户'},{value:'admin',label:'管理员'}]}/></Form.Item></Form></Modal></>
+}

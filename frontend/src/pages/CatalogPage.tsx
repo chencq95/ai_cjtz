@@ -1,0 +1,31 @@
+import { Badge, Button, Card, Descriptions, Drawer, Form, Input, Select, Space, Table, Tabs, Tag, Typography } from 'antd'
+import { ExportOutlined, SearchOutlined } from '@ant-design/icons'
+import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import dayjs from 'dayjs'
+import { api, queryString } from '../api'
+import type { CatalogItem, Platform } from '../types'
+
+export default function CatalogPage() {
+  const [filters,setFilters] = useState<Record<string,unknown>>({page:1,page_size:20})
+  const [selected,setSelected] = useState<string|null>(null)
+  const [form] = Form.useForm()
+  const items = useQuery<any>({ queryKey:['catalog',filters],queryFn:()=>api(`/v1/catalog/items${queryString(filters)}`) })
+  const facets = useQuery<any>({ queryKey:['facets'],queryFn:()=>api('/v1/catalog/facets') })
+  const platforms = useQuery<Platform[]>({queryKey:['platforms'],queryFn:()=>api('/v1/platforms')})
+  const detail = useQuery<any>({queryKey:['item',selected],queryFn:()=>api(`/v1/catalog/items/${selected}`),enabled:!!selected})
+  const versions = useQuery<any[]>({queryKey:['versions',selected],queryFn:()=>api(`/v1/catalog/items/${selected}/versions`),enabled:!!selected})
+  const apply = (values:any) => setFilters({ ...values,page:1,page_size:20 })
+  const columns = [
+    {title:'产品/对象名称',dataIndex:'name',width:300,render:(v:string,r:CatalogItem)=><div><span className="table-link" onClick={()=>setSelected(r.id)}>{v}</span><div className="muted" style={{fontSize:12,marginTop:4}}>{r.description?.slice(0,55)||'暂无简介'}</div></div>},
+    {title:'交易所',dataIndex:'platform_name',width:170},{title:'对象',dataIndex:'kind',width:90,render:(v:string)=><Tag>{v}</Tag>},{title:'产品类型',dataIndex:'product_type',width:120},{title:'数据提供方',dataIndex:'provider',width:210,ellipsis:true},{title:'地域',width:110,render:(_:unknown,r:CatalogItem)=>r.dimensions?.platform_province||r.dimensions?.coverage_region||'—'},{title:'发布日期',dataIndex:'published_at',width:115,render:(v:string)=>v?dayjs(v).format('YYYY-MM-DD'):'—'},{title:'抓取时间',dataIndex:'last_crawled_at',width:140,render:(v:string)=>v?dayjs(v).format('MM-DD HH:mm'):'—'},{title:'置信度',dataIndex:'confidence',width:100,render:(v:number)=><Badge status={v>=.8?'success':'warning'} text={`${Math.round(v*100)}%`}/>},
+  ]
+  return <>
+    <div className="page-head"><div><h1>数据目录</h1><p>跨交易所检索产品、组件、场景及其版本证据</p></div><Button icon={<ExportOutlined/>} disabled>导出结果</Button></div>
+    <Card className="filter-card"><Form form={form} layout="inline" onFinish={apply} style={{rowGap:12}}><Form.Item name="q"><Input prefix={<SearchOutlined/>} placeholder="搜索名称、简介、提供方" allowClear style={{width:260}}/></Form.Item><Form.Item name="platform_id"><Select allowClear placeholder="交易所" style={{width:180}} options={(platforms.data||[]).map(p=>({value:p.id,label:p.name}))}/></Form.Item><Form.Item name="kind"><Select allowClear placeholder="对象类型" style={{width:130}} options={['product','component','scenario','demand'].map(value=>({value}))}/></Form.Item><Form.Item name="product_type"><Select allowClear placeholder="产品类型" style={{width:140}} options={(facets.data?.product_types||[]).map((x:any)=>({value:x.value,label:`${x.value} (${x.count})`}))}/></Form.Item><Form.Item name="industry"><Select allowClear showSearch placeholder="行业" style={{width:150}} options={(facets.data?.dimensions||[]).filter((x:any)=>x.type==='industry').map((x:any)=>({value:x.value,label:`${x.value} (${x.count})`}))}/></Form.Item><Form.Item name="region"><Select allowClear showSearch placeholder="地域" style={{width:140}} options={(facets.data?.dimensions||[]).filter((x:any)=>x.type!=='industry').map((x:any)=>({value:x.value,label:x.value}))}/></Form.Item><Button type="primary" htmlType="submit">查询</Button><Button onClick={()=>{form.resetFields();setFilters({page:1,page_size:20})}}>重置</Button></Form></Card>
+    <Table rowKey="id" className="panel-card" loading={items.isLoading} dataSource={items.data?.items||[]} columns={columns} scroll={{x:1450}} pagination={{current:filters.page as number,pageSize:20,total:items.data?.total,onChange:page=>setFilters(old=>({...old,page}))}} />
+    <Drawer open={!!selected} onClose={()=>setSelected(null)} width={920} title={detail.data?.name||'目录详情'} extra={detail.data?.source_url?<a href={detail.data.source_url} target="_blank">查看来源</a>:null}>
+      {detail.data && <Tabs items={[{key:'current',label:'当前版本',children:<><Descriptions bordered size="small" column={2} items={[{key:'platform',label:'交易所',children:detail.data.platform.name},{key:'kind',label:'对象类型',children:detail.data.kind},{key:'type',label:'产品类型',children:detail.data.product_type},{key:'provider',label:'数据提供方',children:detail.data.provider||'—'},{key:'published',label:'发布时间',children:detail.data.published_at||'—'},{key:'crawled',label:'抓取时间',children:detail.data.last_crawled_at||'—'},{key:'delivery',label:'交付方式',children:detail.data.delivery_method||'—'},{key:'frequency',label:'更新频率',children:detail.data.refresh_frequency||'—'},{key:'description',label:'简介',span:2,children:detail.data.description||'—'}]}/><div className="detail-section"><h3>规范维度</h3><Space wrap>{detail.data.dimensions.map((d:any)=><Tag key={`${d.type}-${d.value}`}>{d.type}: {d.value} · {Math.round(d.confidence*100)}%</Tag>)}</Space></div><div className="detail-section"><h3>字段证据</h3><Table size="small" rowKey={(r:any)=>`${r.field}-${r.locator}`} dataSource={detail.data.evidence} pagination={false} columns={[{title:'字段',dataIndex:'field'},{title:'原始值',dataIndex:'raw_value',ellipsis:true},{title:'定位',dataIndex:'locator'},{title:'方法',dataIndex:'method'},{title:'置信度',dataIndex:'confidence',render:(v:number)=>`${Math.round(v*100)}%`}]} /></div></>},{key:'history',label:`历史版本 (${versions.data?.length||0})`,children:<Table size="small" rowKey="id" dataSource={versions.data||[]} pagination={false} columns={[{title:'版本',dataIndex:'version'},{title:'生效时间',dataIndex:'valid_from',render:(v:string)=>dayjs(v).format('YYYY-MM-DD HH:mm')},{title:'失效时间',dataIndex:'valid_to',render:(v:string)=>v?dayjs(v).format('YYYY-MM-DD HH:mm'):'当前'},{title:'产品类型',dataIndex:'product_type'},{title:'提供方',dataIndex:'provider'},{title:'变更字段',dataIndex:'diff',render:(v:any)=>Object.keys(v||{}).join('、')||'首次入库'}]}/>}]} />}
+    </Drawer>
+  </>
+}

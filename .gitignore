@@ -1,0 +1,44 @@
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and packaging outputs
+.venv/
+venv/
+env/
+node_modules/
+build/
+dist/
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+*.egg-info/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# Runtime data
+data/*.db
+data/*.db-*
+data/raw/
+data/browser/
+logs/
+*.log
+
+# Browser/runtime caches
+.playwright/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,132 @@
+x-backend-env: &backend-env
+  DMP_ENVIRONMENT: production
+  DMP_DATABASE_URL: postgresql+psycopg://dmp:${POSTGRES_PASSWORD:-dmp-change-me}@postgres:5432/dmp
+  DMP_REDIS_URL: redis://redis:6379/0
+  DMP_OBJECT_STORE_BACKEND: minio
+  DMP_MINIO_ENDPOINT: minio:9000
+  DMP_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dmpminio}
+  DMP_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-dmp-minio-change-me}
+  DMP_MINIO_BUCKET: data-market-raw
+  DMP_ARCHIVE_PATH: /archive
+  DMP_AUTH_SECRET_KEY: ${DMP_AUTH_SECRET_KEY:-replace-this-with-a-long-random-secret}
+  DMP_BOOTSTRAP_ADMIN_USERNAME: ${DMP_BOOTSTRAP_ADMIN_USERNAME:-admin}
+  DMP_BOOTSTRAP_ADMIN_PASSWORD: ${DMP_BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe123!}
+  DMP_COOKIE_SECURE: "false"
+  DMP_API_CORS_ORIGINS: ${DMP_API_CORS_ORIGINS:-http://60.205.220.69:8888}
+  DMP_LLM_ENABLED: ${DMP_LLM_ENABLED:-false}
+  DMP_LLM_BASE_URL: ${DMP_LLM_BASE_URL:-https://api.openai.com/v1}
+  DMP_LLM_API_KEY: ${DMP_LLM_API_KEY:-}
+  DMP_LLM_MODEL: ${DMP_LLM_MODEL:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: dmp
+      POSTGRES_USER: dmp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dmp-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dmp -d dmp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dmpminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dmp-minio-change-me}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/data-market-raw"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dmpminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dmp-minio-change-me}
+
+  api:
+    build: .
+    environment: *backend-env
+    command: ["/bin/bash", "/app/scripts/docker-entrypoint.sh", "uvicorn", "data_market_probe.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - archive_data:/archive
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  worker:
+    build: .
+    environment: *backend-env
+    command: ["celery", "-A", "data_market_probe.tasks:celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    volumes:
+      - archive_data:/archive
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    environment: *backend-env
+    command: ["python", "-m", "data_market_probe.cli", "schedule"]
+    volumes:
+      - archive_data:/archive
+    depends_on:
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "0.0.0.0:8888:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  archive_data:

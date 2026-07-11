@@ -1,0 +1,13 @@
+{
+  "8": {
+    "adapter": "hubei-public-v1",
+    "render_mode": "browser",
+    "collections": [
+      {"code": "data-products", "name": "数据产品", "object_kind": "product", "entry_url": "https://dex.hubei-data.com/product/list", "enabled": true, "pagination_mode": "browser"},
+      {"code": "data-components", "name": "AI工厂与数据组件", "object_kind": "component", "entry_url": "https://dex.hubei-data.com/AIFactory", "enabled": true, "pagination_mode": "browser"},
+      {"code": "data-scenarios", "name": "特色专区与应用场景", "object_kind": "scenario", "entry_url": "https://dex.hubei-data.com/specialArea", "enabled": true, "pagination_mode": "browser"},
+      {"code": "demands", "name": "需求大厅", "object_kind": "demand", "entry_url": "https://dex.hubei-data.com/demand", "enabled": true, "pagination_mode": "browser"},
+      {"code": "providers", "name": "数商生态", "object_kind": "provider", "entry_url": "https://dex.hubei-data.com/ecology", "enabled": true, "pagination_mode": "browser"}
+    ]
+  }
+}
