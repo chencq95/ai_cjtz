@@ -38,7 +38,7 @@ jobs:
         shell: bash
         run: |
           ! git ls-files | grep -E '(^|/)(\.env|.*\.pem|id_rsa|id_ed25519)$'
-          ! git grep -nE '(gho_|github_pat_|BEGIN (RSA |OPENSSH )?PRIVATE KEY)' -- . ':!*.lock'
+          ! git grep -nE '(gho_|github_pat_|BEGIN (RSA |OPENSSH )?PRIVATE KEY)' -- . ':!*.lock' ':!.github/workflows/ci-deploy.yml'
 
   deploy:
     needs: test
