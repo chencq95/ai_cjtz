@@ -25,11 +25,8 @@ frontend/vite.config.d.ts
 !.env.example
 !.env.docker.example
 
-# Runtime data
-data/*.db
-data/*.db-*
-data/raw/
-data/browser/
+# Runtime data (databases, raw snapshots, audit exports, browser artifacts)
+data/
 logs/
 *.log
 

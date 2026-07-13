@@ -278,6 +278,35 @@ async def _crawl_platform(
             return {"platform_id": platform.id, "status": "no_url", "pages": 0, "items": 0, "errors": 0}
 
         allowed_families = {domain_family(registrable_host(entry_url))}
+        if not allowed_host_for_url(entry_url, allowed_families):
+            repository.record_error(
+                run_id=run.id,
+                platform_id=platform.id,
+                collection_id=None,
+                url=entry_url,
+                stage="ssrf_guard",
+                error="入口 URL 未通过公网地址安全校验",
+                retryable=False,
+            )
+            platform_run.status = "blocked"
+            platform_run.coverage_status = "blocked"
+            platform_run.error_count = 1
+            platform_run.notes = "入口 URL 未通过公网地址安全校验，未发起网络请求"
+            platform_run.finished_at = _utcnow()
+            session.commit()
+            return {
+                "platform_id": platform.id,
+                "name": platform.name,
+                "status": "blocked",
+                "coverage": "blocked",
+                "pages": 0,
+                "items_seen": 0,
+                "items_new": 0,
+                "items_updated": 0,
+                "errors": 1,
+                "page_limit_hit": False,
+                "cancelled": False,
+            }
         fetcher.rate_limiter.set_rate(entry_url, platform.default_rate_limit)
         collections = session.scalars(
             select(SourceCollection).where(

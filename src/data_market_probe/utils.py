@@ -98,7 +98,22 @@ def is_public_hostname(hostname: str) -> bool:
         return True  # Let the fetcher record a precise DNS failure.
     if not addresses:
         return False
-    return all(ipaddress.ip_address(address).is_global for address in addresses)
+    parsed_addresses = [ipaddress.ip_address(address) for address in addresses]
+    if all(address.is_global for address in parsed_addresses):
+        return True
+
+    # Several system-wide proxy/TUN implementations intentionally synthesize
+    # DNS answers from the RFC 2544 benchmarking range (198.18.0.0/15).  Those
+    # addresses are not routable private services: the proxy uses the original
+    # hostname carried by the HTTP client to reach the public destination.  A
+    # hostname whose answers are *all* in this range is therefore safe to pass
+    # to the fetch layer.  Literal 198.18/15 IP URLs remain rejected above, and
+    # mixed benchmark/private answers still fail closed.
+    benchmark_network = ipaddress.ip_network("198.18.0.0/15")
+    return all(
+        isinstance(address, ipaddress.IPv4Address) and address in benchmark_network
+        for address in parsed_addresses
+    )
 
 
 def parse_datetime(value: Any) -> datetime | None:
@@ -123,4 +138,3 @@ def parse_datetime(value: Any) -> datetime | None:
 def safe_snippet(value: str, limit: int = 500) -> str:
     value = normalize_text(value)
     return value if len(value) <= limit else value[: limit - 1] + "…"
-

@@ -104,3 +104,32 @@ def test_is_public_hostname_rejects_mixed_public_private_dns_answers(
     monkeypatch.setattr(utils.socket, "getaddrinfo", fake_getaddrinfo)
 
     assert not is_public_hostname("rebind.example.test")
+
+
+def test_is_public_hostname_accepts_proxy_synthetic_dns_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_getaddrinfo(*_args: object, **_kwargs: object) -> list[tuple[object, ...]]:
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("198.18.0.7", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("198.19.255.9", 443)),
+        ]
+
+    monkeypatch.setattr(utils.socket, "getaddrinfo", fake_getaddrinfo)
+
+    assert is_public_hostname("public-through-proxy.example.test")
+    assert not is_public_hostname("198.18.0.7")
+
+
+def test_is_public_hostname_rejects_mixed_proxy_private_dns_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_getaddrinfo(*_args: object, **_kwargs: object) -> list[tuple[object, ...]]:
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("198.18.0.7", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.8", 443)),
+        ]
+
+    monkeypatch.setattr(utils.socket, "getaddrinfo", fake_getaddrinfo)
+
+    assert not is_public_hostname("mixed-through-proxy.example.test")
