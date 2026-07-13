@@ -416,7 +416,10 @@ def looks_like_spa(body: bytes, url: str, mime_type: str) -> bool:
     ssr_markers = any(marker in head for marker in ("window.__NUXT__", "__NEXT_DATA__"))
     app_markers = any(
         marker in head
-        for marker in ("id=\"app\"", "id='app'", "id=\"root\"", "id='root'", "webpack", "vite")
+        for marker in (
+            "id=\"app\"", "id='app'", "id=\"root\"", "id='root'",
+            "id=\"main\"", "id='main'", "webpack", "vite",
+        )
     )
     # Nuxt/Next pages may contain substantial server-rendered navigation or
     # promotional copy while their catalog records still load through browser

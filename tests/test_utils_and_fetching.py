@@ -152,3 +152,11 @@ def test_ordinary_static_page_with_scripts_is_not_forced_into_browser() -> None:
     ).encode()
 
     assert not looks_like_spa(body, "https://example.com/news/1", "text/html")
+
+
+def test_empty_main_mount_with_module_bundle_is_treated_as_spa() -> None:
+    body = b"""<!doctype html><html><body><div id="main"></div>
+    <script type="module" src="/static/index.js"></script>
+    <script>document.title = 'catalog'</script></body></html>"""
+
+    assert looks_like_spa(body, "https://example.com/home", "text/html")
