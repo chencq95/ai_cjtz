@@ -342,7 +342,12 @@ def extract_html(
     kind, score = _kind_and_score(url, title, fields, body_text)
     items: list[ExtractedItem] = []
     name = _name_from_page(soup, title, fields)
-    if name and score >= 4.5:
+    path_lower = urlsplit(url).path.lower().rstrip("/")
+    list_like_page = any(
+        marker in path_lower
+        for marker in ("/list", "/catalog", "/search", "/index")
+    ) or path_lower.endswith(("/product", "/goods", "/dataset", "/scenario", "/demand"))
+    if name and score >= 4.5 and (not list_like_page or bool(fields.get("name"))):
         fields.setdefault("description", _description(soup, fields))
         fields.setdefault("external_id", _external_id_from_url(url))
         items.append(_build_item(kind=kind, name=name, source_url=url, values=fields, evidence=evidence, confidence=score, platform_province=platform_province, platform_city=platform_city))
@@ -350,18 +355,57 @@ def extract_html(
     # Preserve list-only catalog cards so inaccessible details do not erase public listings.
     if any(term.lower() in f"{title} {url}".lower() for term in TARGET_TERMS):
         card_selectors = ".product-item, .goods-item, .data-item, .scenario-item, .scene-item, [class*='product-card'], [class*='goods-card']"
-        for index, card in enumerate(soup.select(card_selectors)):
-            anchor = card.find("a", href=True)
+        cards = list(soup.select(card_selectors))
+        cards.extend(
+            soup.select(
+                "a[href*='/product/detail/'], a[href*='/goods/detail/'], "
+                "a[href*='/scenario/detail/'], a[href*='/scene/detail/'], "
+                "a[href*='/demand/detail/'], a[href*='/requirement/detail/']"
+            )
+        )
+        seen_card_urls: set[str] = set()
+        for index, card in enumerate(cards):
+            anchor = card if card.name == "a" and card.get("href") else card.find("a", href=True)
             if not isinstance(anchor, Tag):
                 continue
             target = canonicalize_url(url, str(anchor.get("href")))
-            card_name = normalize_text(anchor.get_text(" ", strip=True))
+            if not target or target in seen_card_urls:
+                continue
+            seen_card_urls.add(target)
+            name_node = anchor.select_one(
+                ".content-title .title, .product-title, .goods-title, "
+                ".card-title, [class~='title'], h2, h3, h4"
+            )
+            card_name = normalize_text(
+                name_node.get_text(" ", strip=True) if name_node else anchor.get_text(" ", strip=True)
+            )
             if not target or not (2 <= len(card_name) <= 300) or card_name in GENERIC_NAMES:
                 continue
             if any(existing.source_url == target for existing in items):
                 continue
-            card_kind, _ = _kind_and_score(target, card_name, {}, card.get_text(" ", strip=True))
-            items.append(_build_item(kind=card_kind, name=card_name, source_url=target, values={"external_id": _external_id_from_url(target)}, evidence={"name": Evidence("name", card_name, f"catalog-card[{index}]", confidence=0.65)}, confidence=5.5, platform_province=platform_province, platform_city=platform_city))
+            card_text = normalize_text(anchor.get_text(" ", strip=True))
+            provider_node = anchor.select_one(".product-org, .provider, [class*='provider']")
+            values = {
+                "external_id": _external_id_from_url(target),
+                "description": safe_snippet(card_text, 2_000),
+            }
+            if provider_node:
+                values["provider"] = normalize_text(provider_node.get_text(" ", strip=True))
+            delivery_match = re.search(
+                r"交付方式\s*[：:]\s*(.+?)(?=\s+(?:应用场景|所属行业|提供方|供应商)\s*[：:]|[，,；;]|$)",
+                card_text,
+            )
+            if delivery_match:
+                values["delivery_method"] = normalize_text(delivery_match.group(1))
+            card_kind, _ = _kind_and_score(target, card_name, values, card_text)
+            card_evidence = {
+                "name": Evidence("name", card_name, f"catalog-card[{index}]", confidence=0.75)
+            }
+            if values.get("provider"):
+                card_evidence["provider"] = Evidence(
+                    "provider", str(values["provider"]), f"catalog-card[{index}].provider", confidence=0.70
+                )
+            items.append(_build_item(kind=card_kind, name=card_name, source_url=target, values=values, evidence=card_evidence, confidence=6.0, platform_province=platform_province, platform_city=platform_city))
     return ExtractedPage(title=title, text=body_text, links=links, items=items)
 
 

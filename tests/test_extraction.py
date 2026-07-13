@@ -51,6 +51,30 @@ def test_typed_product_route_wins_over_scenario_copy() -> None:
     assert page.items[0].kind == "product"
 
 
+def test_utility_class_product_links_are_preserved_as_catalog_items() -> None:
+    page = extract_html(
+        """
+        <html><head><title>数据产品列表</title></head><body>
+          <a href="/product/detail/1904" class="flex-1 flex flex-col">
+            <div class="content-title"><div class="title">武汉燃气供气点活跃度数据</div></div>
+            <div>交付方式：API接口</div>
+            <div>应用场景：智慧城市，保险科技</div>
+            <span class="product-org">武汉市燃气集团有限公司</span>
+          </a>
+        </body></html>
+        """,
+        "https://exchange.example/product/list",
+    )
+
+    assert len(page.items) == 1
+    item = page.items[0]
+    assert item.kind == "product"
+    assert item.name == "武汉燃气供气点活跃度数据"
+    assert item.provider == "武汉市燃气集团有限公司"
+    assert item.delivery_method == "API接口"
+    assert item.source_url == "https://exchange.example/product/detail/1904"
+
+
 def test_json_catalog_records_are_extracted_without_html() -> None:
     page = extract_json(
         {
