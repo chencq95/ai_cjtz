@@ -25,6 +25,7 @@ def test_html_product_fields_dimensions_and_evidence() -> None:
     )
     assert len(page.items) == 1
     item = page.items[0]
+    assert item.kind == "product"
     assert item.name == "企业经营风险查询 API"
     assert item.product_type == "api"
     assert item.provider == "示例数据科技有限公司"
@@ -32,6 +33,22 @@ def test_html_product_fields_dimensions_and_evidence() -> None:
     assert any(value.dimension_type == "industry" and value.normalized_value == "finance" for value in item.dimensions)
     assert any(value.dimension_type == "platform_province" and value.normalized_value == "湖北省" for value in item.dimensions)
     assert {value.field_name for value in item.evidence} >= {"name", "provider", "product_type_raw"}
+
+
+def test_typed_product_route_wins_over_scenario_copy() -> None:
+    page = extract_html(
+        """
+        <html><head><title>数据产品详情</title></head><body>
+          <h1>城市水环境综合分析数据集</h1>
+          <table><tr><th>产品名称</th><td>城市水环境综合分析数据集</td></tr></table>
+          <p>面向水环境治理应用场景提供综合分析能力。</p>
+        </body></html>
+        """,
+        "https://exchange.example/product/detail/2056",
+    )
+
+    assert len(page.items) == 1
+    assert page.items[0].kind == "product"
 
 
 def test_json_catalog_records_are_extracted_without_html() -> None:
@@ -57,4 +74,3 @@ def test_json_catalog_records_are_extracted_without_html() -> None:
     assert item.external_id == "p-1"
     assert item.product_type == "dataset"
     assert any(value.normalized_value == "transportation" for value in item.dimensions)
-

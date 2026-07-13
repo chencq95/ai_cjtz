@@ -185,8 +185,20 @@ def _collect_pairs(soup: BeautifulSoup) -> tuple[dict[str, str], dict[str, Evide
 
 
 def _kind_and_score(url: str, title: str, fields: dict[str, str], body_text: str) -> tuple[str, float]:
+    lower_url = url.lower()
     context = normalize_text(f"{url} {title} {body_text[:1500]}").lower()
-    if any(term in context for term in ("应用场景", "数据场景", "场景详情", "scenario", "解决方案")):
+    # A typed route is stronger evidence than descriptive copy.  Product pages
+    # routinely mention the application scenarios they support, which must not
+    # turn the product itself into a scenario entity.
+    if any(term in lower_url for term in ("/demand", "demand/", "requirement/")):
+        kind = "demand"
+    elif any(term in lower_url for term in ("/scenario", "scenario/", "/scene/", "/solution/")):
+        kind = "scenario"
+    elif any(term in lower_url for term in ("/component", "component/", "/tool/", "/algorithm/", "/aifactory")):
+        kind = "component"
+    elif any(term in lower_url for term in ("/product", "product/", "/goods/", "/dataset/", "/catalog/")):
+        kind = "product"
+    elif any(term in context for term in ("应用场景", "数据场景", "场景详情", "scenario", "解决方案")):
         kind = "scenario"
     elif any(term in context for term in ("数据组件", "组件详情", "component", "算法工具", "开发工具")):
         kind = "component"
@@ -195,7 +207,6 @@ def _kind_and_score(url: str, title: str, fields: dict[str, str], body_text: str
     else:
         kind = "product"
 
-    lower_url = url.lower()
     score = 0.0
     if any(term in lower_url for term in DETAIL_PATH_TERMS):
         score += 3.0
@@ -421,4 +432,3 @@ def extract_json(
         items.append(_build_item(kind=kind, name=name, source_url=item_url, values=values, evidence=evidence, confidence=max(score, 5.0), platform_province=platform_province, platform_city=platform_city))
     text = normalize_text(json.dumps(payload, ensure_ascii=False, default=str))
     return ExtractedPage(title="", text=text, links=[], items=items)
-
