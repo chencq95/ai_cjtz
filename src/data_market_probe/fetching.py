@@ -413,5 +413,14 @@ def looks_like_spa(body: bytes, url: str, mime_type: str) -> bool:
     without_markup = re.sub(r"<[^>]+>", " ", head)
     visible = re.sub(r"\s+", " ", without_markup).strip()
     scripts = len(re.findall(r"<script\b", head, re.I))
-    markers = any(marker in head for marker in ("id=\"app\"", "id='app'", "__NEXT_DATA__", "webpack", "vite"))
-    return scripts >= 2 and markers and len(visible) < 800
+    ssr_markers = any(marker in head for marker in ("window.__NUXT__", "__NEXT_DATA__"))
+    app_markers = any(
+        marker in head
+        for marker in ("id=\"app\"", "id='app'", "id=\"root\"", "id='root'", "webpack", "vite")
+    )
+    # Nuxt/Next pages may contain substantial server-rendered navigation or
+    # promotional copy while their catalog records still load through browser
+    # APIs.  Treat those framework markers as render-worthy regardless of the
+    # visible-text heuristic; retain the stricter threshold for generic app
+    # shells to avoid rendering ordinary static pages unnecessarily.
+    return scripts >= 2 and (ssr_markers or (app_markers and len(visible) < 800))

@@ -5,7 +5,7 @@ import socket
 import pytest
 
 from data_market_probe import utils
-from data_market_probe.fetching import allowed_host_for_url, domain_family
+from data_market_probe.fetching import allowed_host_for_url, domain_family, looks_like_spa
 from data_market_probe.utils import canonicalize_url, host_allowed, is_public_hostname
 
 
@@ -133,3 +133,22 @@ def test_is_public_hostname_rejects_mixed_proxy_private_dns_answers(
     monkeypatch.setattr(utils.socket, "getaddrinfo", fake_getaddrinfo)
 
     assert not is_public_hostname("mixed-through-proxy.example.test")
+
+
+def test_nuxt_ssr_catalog_is_rendered_even_with_substantial_visible_copy() -> None:
+    body = (
+        "<!doctype html><html><body><div>" + ("公开数据交易目录介绍" * 100) + "</div>"
+        "<script>window.__NUXT__={serverRendered:true}</script>"
+        "<script src='/_nuxt/app.js'></script></body></html>"
+    ).encode()
+
+    assert looks_like_spa(body, "https://example.com/product/list", "text/html")
+
+
+def test_ordinary_static_page_with_scripts_is_not_forced_into_browser() -> None:
+    body = (
+        "<!doctype html><html><body><article>" + ("新闻内容" * 300) + "</article>"
+        "<script src='/jquery.js'></script><script src='/site.js'></script></body></html>"
+    ).encode()
+
+    assert not looks_like_spa(body, "https://example.com/news/1", "text/html")
