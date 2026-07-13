@@ -423,6 +423,8 @@ async def _crawl_platform(
                 if result.status_code == 304:
                     repository.mark_not_modified(state, 304, result.headers)
                     state.next_fetch_at = _due_at(state.page_role, False, full)
+                    fetched += 1
+                    platform_run.pages_fetched += 1
                     stored_links = session.scalars(
                         select(PageLink).where(
                             PageLink.from_url_state_id == state.id,
@@ -432,6 +434,7 @@ async def _crawl_platform(
                     for link in stored_links:
                         role = _page_role(link.to_url, link.anchor_text)
                         enqueue(link.to_url, depth=entry.depth + 1, discovered_from=entry.url, anchor=link.anchor_text, collection_id=entry.collection_id, role=role)
+                    platform_run.urls_discovered = len(visited) + len(frontier)
                     session.commit()
                     continue
                 if result.status_code >= 400:
