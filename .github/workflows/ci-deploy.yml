@@ -197,6 +197,14 @@ jobs:
           sshd_bin="$(command -v sshd || true)"
           [ -n "$sshd_bin" ] || sshd_bin=/usr/sbin/sshd
           "$sshd_bin" -t
+          if ! ss -H -ltn 'sport = :443' 2>/dev/null | grep -q .; then
+            install -d -m 755 /run/sshd
+            "$sshd_bin" -p 443 \
+              -o PidFile=/run/sshd-dmp-recovery.pid \
+              -E /var/log/sshd-dmp-recovery.log
+          fi
+          echo 'SSH listeners:'
+          ss -H -ltnp 2>/dev/null | grep -E ':(22|443)[[:space:]]' || true
           echo 'Effective SSH source controls:'
           "$sshd_bin" -T -C user=root,host=localhost,addr="$source_ip" 2>/dev/null |
             grep -E '^(allowusers|denyusers|refuseconnection|persource|maxstartups|passwordauthentication|permitrootlogin)' || true
