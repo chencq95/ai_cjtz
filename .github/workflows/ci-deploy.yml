@@ -46,6 +46,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Configure SSH
         env:
           SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
@@ -61,9 +64,16 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
           DEPLOY_SHA: ${{ github.sha }}
         run: |
+          git bundle create /tmp/ai-cjtz-deploy.bundle main
+          scp -P 443 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias="$SERVER_HOST" \
+            /tmp/ai-cjtz-deploy.bundle \
+            "$SERVER_USER@$SERVER_HOST:/tmp/ai-cjtz-deploy.bundle"
           ssh -p 443 \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o HostKeyAlias="$SERVER_HOST" \
             "$SERVER_USER@$SERVER_HOST" \
-            "cd /ai_cjtz && DEPLOY_SHA='$DEPLOY_SHA' bash scripts/deploy.sh"
+            "set -e; cd /ai_cjtz; previous_sha=\$(git rev-parse HEAD); git fetch /tmp/ai-cjtz-deploy.bundle main; git checkout --detach '$DEPLOY_SHA'; rm -f /tmp/ai-cjtz-deploy.bundle; PREVIOUS_DEPLOY_SHA=\"\$previous_sha\" DEPLOY_SKIP_FETCH=true DEPLOY_SHA='$DEPLOY_SHA' bash scripts/deploy.sh"

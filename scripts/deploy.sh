@@ -6,13 +6,15 @@ deploy_sha="${DEPLOY_SHA:?DEPLOY_SHA is required}"
 health_url="${HEALTH_URL:-http://127.0.0.1:8888/api/health}"
 
 cd "$deploy_dir"
-previous_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+previous_sha="${PREVIOUS_DEPLOY_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}"
 
 if docker compose ps --status running postgres 2>/dev/null | grep -q postgres; then
   ./scripts/backup.sh "./backups/pre-deploy-$(date +%Y%m%d-%H%M%S)"
 fi
 
-git fetch --prune origin main
+if [[ "${DEPLOY_SKIP_FETCH:-false}" != "true" ]]; then
+  git fetch --prune origin main
+fi
 git checkout --detach "$deploy_sha"
 
 rollback() {
