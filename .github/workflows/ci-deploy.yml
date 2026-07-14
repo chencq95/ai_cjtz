@@ -34,6 +34,100 @@ jobs:
           print("SSH banner received")
           PY
 
+  bootstrap-server-access:
+    needs: ssh-diagnostic
+    if: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, 'bootstrap server access') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install one-time SSH password helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Decrypt one-time bootstrap payload
+        env:
+          SERVER_BOOTSTRAP_RSA_KEY: ${{ secrets.SERVER_BOOTSTRAP_RSA_KEY }}
+        run: |
+          install -m 700 -d /tmp/dmp-bootstrap
+          printf '%s\n' "$SERVER_BOOTSTRAP_RSA_KEY" > /tmp/dmp-bootstrap/rsa.pem
+          chmod 600 /tmp/dmp-bootstrap/rsa.pem
+          base64 -d config/bootstrap.enc.b64 > /tmp/dmp-bootstrap/payload.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/dmp-bootstrap/rsa.pem \
+            -in /tmp/dmp-bootstrap/payload.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            > /tmp/dmp-bootstrap/payload
+          sed -n '1p' /tmp/dmp-bootstrap/payload > /tmp/dmp-bootstrap/password
+          sed -n '2p' /tmp/dmp-bootstrap/payload > /tmp/dmp-bootstrap/blocked_ip
+          chmod 600 /tmp/dmp-bootstrap/password /tmp/dmp-bootstrap/payload
+      - name: Install deployment key and remove the source ban
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_HOST_KEY: ${{ secrets.SERVER_HOST_KEY }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          printf '%s\n' "$SERVER_HOST_KEY" > /tmp/dmp-bootstrap/known_hosts
+          printf '%s\n' "$SERVER_SSH_KEY" > /tmp/dmp-bootstrap/deploy_key
+          chmod 600 /tmp/dmp-bootstrap/deploy_key /tmp/dmp-bootstrap/known_hosts
+          ssh-keygen -y -f /tmp/dmp-bootstrap/deploy_key > /tmp/dmp-bootstrap/deploy_key.pub
+          BLOCKED_IP="$(cat /tmp/dmp-bootstrap/blocked_ip)"
+          DEPLOY_KEY="$(cat /tmp/dmp-bootstrap/deploy_key.pub)"
+          sshpass -f /tmp/dmp-bootstrap/password ssh \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=/tmp/dmp-bootstrap/known_hosts \
+            "$SERVER_USER@$SERVER_HOST" \
+            "bash -s -- '$BLOCKED_IP' '$DEPLOY_KEY'" <<'REMOTE'
+          set -euo pipefail
+          blocked_ip="$1"
+          deploy_key="$2"
+          install -d -m 700 /root/.ssh
+          touch /root/.ssh/authorized_keys
+          grep -qxF "$deploy_key" /root/.ssh/authorized_keys || printf '%s\n' "$deploy_key" >> /root/.ssh/authorized_keys
+          chmod 600 /root/.ssh/authorized_keys
+
+          if command -v fail2ban-client >/dev/null 2>&1; then
+            fail2ban-client status 2>/dev/null |
+              sed -n 's/.*Jail list:[[:space:]]*//p' |
+              tr ',' '\n' |
+              while read -r jail; do
+                jail="$(printf '%s' "$jail" | xargs)"
+                [ -n "$jail" ] && fail2ban-client set "$jail" unbanip "$blocked_ip" >/dev/null 2>&1 || true
+              done
+          fi
+
+          if [ -f /etc/hosts.deny ] && grep -Fq "$blocked_ip" /etc/hosts.deny; then
+            cp -a /etc/hosts.deny "/etc/hosts.deny.dmp-backup-$(date +%s)"
+            sed -i "\|$blocked_ip|d" /etc/hosts.deny
+          fi
+
+          if command -v iptables >/dev/null 2>&1; then
+            iptables -S INPUT 2>/dev/null |
+              grep -F -- "-s $blocked_ip/32" |
+              while read -r rule; do
+                delete_rule="${rule/-A /-D }"
+                iptables $delete_rule >/dev/null 2>&1 || true
+              done
+          fi
+
+          sshd -t
+          systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true
+          REMOTE
+      - name: Verify deployment-key authentication
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -i /tmp/dmp-bootstrap/deploy_key \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=/tmp/dmp-bootstrap/known_hosts \
+            "$SERVER_USER@$SERVER_HOST" 'printf deployment-key-ok'
+      - name: Remove decrypted bootstrap material
+        if: always()
+        run: rm -rf /tmp/dmp-bootstrap
+
   test:
     runs-on: ubuntu-latest
     steps:
