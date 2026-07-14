@@ -103,15 +103,18 @@ jobs:
           fi
 
           if command -v iptables >/dev/null 2>&1; then
-            iptables -S INPUT 2>/dev/null |
-              grep -F -- "-s $blocked_ip/32" |
-              while read -r rule; do
-                delete_rule="${rule/-A /-D }"
-                iptables $delete_rule >/dev/null 2>&1 || true
-              done
+            while read -r rule; do
+              [ -n "$rule" ] || continue
+              delete_rule="${rule/-A /-D }"
+              iptables $delete_rule >/dev/null 2>&1 || true
+            done < <(iptables -S INPUT 2>/dev/null | grep -F -- "-s $blocked_ip/32" || true)
           fi
 
-          sshd -t
+          if command -v sshd >/dev/null 2>&1; then
+            sshd -t
+          else
+            /usr/sbin/sshd -t
+          fi
           systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true
           REMOTE
       - name: Verify deployment-key authentication
