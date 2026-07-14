@@ -18,6 +18,11 @@ x-backend-env: &backend-env
   DMP_LLM_API_KEY: ${DMP_LLM_API_KEY:-}
   DMP_LLM_MODEL: ${DMP_LLM_MODEL:-}
 
+x-backend-build: &backend-build
+  context: .
+  args:
+    PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -73,7 +78,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dmp-minio-change-me}
 
   api:
-    build: .
+    build: *backend-build
     environment: *backend-env
     command: ["/bin/bash", "/app/scripts/docker-entrypoint.sh", "uvicorn", "data_market_probe.api:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
@@ -93,7 +98,7 @@ services:
     restart: unless-stopped
 
   worker:
-    build: .
+    build: *backend-build
     environment: *backend-env
     command: ["celery", "-A", "data_market_probe.tasks:celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
     volumes:
@@ -104,7 +109,7 @@ services:
     restart: unless-stopped
 
   scheduler:
-    build: .
+    build: *backend-build
     environment: *backend-env
     command: ["python", "-m", "data_market_probe.cli", "schedule"]
     volumes:
