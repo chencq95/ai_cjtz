@@ -9,6 +9,31 @@ permissions:
   contents: read
 
 jobs:
+  ssh-diagnostic:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: TCP 22 reachable from GitHub runner
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+        run: timeout 12 bash -c '</dev/tcp/$SERVER_HOST/22'
+      - name: Server sends SSH banner to GitHub runner
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          python - <<'PY'
+          import os
+          import socket
+
+          host = os.environ["SERVER_HOST"]
+          with socket.create_connection((host, 22), timeout=10) as connection:
+              connection.settimeout(10)
+              banner = connection.recv(255)
+          if not banner.startswith(b"SSH-"):
+              raise SystemExit("port 22 accepted TCP but closed before an SSH banner")
+          print("SSH banner received")
+          PY
+
   test:
     runs-on: ubuntu-latest
     steps:
