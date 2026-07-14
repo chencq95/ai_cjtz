@@ -42,7 +42,7 @@ jobs:
 
   deploy:
     needs: test
-    if: ${{ github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true' }}
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     environment: production
     steps:
