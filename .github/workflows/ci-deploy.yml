@@ -131,6 +131,84 @@ jobs:
         if: always()
         run: rm -rf /tmp/dmp-bootstrap
 
+  repair-local-ssh:
+    needs: ssh-diagnostic
+    if: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, 'repair local ssh source') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure deployment key
+        env:
+          SERVER_HOST_KEY: ${{ secrets.SERVER_HOST_KEY }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SERVER_HOST_KEY" > ~/.ssh/known_hosts
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/known_hosts ~/.ssh/deploy_key
+      - name: Remove exact local-source bans and report SSH controls
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          LOCAL_SOURCE_IP: 188.253.112.120
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$SERVER_USER@$SERVER_HOST" \
+            "bash -s -- '$LOCAL_SOURCE_IP'" <<'REMOTE'
+          set -uo pipefail
+          source_ip="$1"
+
+          if command -v fail2ban-client >/dev/null 2>&1; then
+            fail2ban-client status 2>/dev/null |
+              sed -n 's/.*Jail list:[[:space:]]*//p' |
+              tr ',' '\n' |
+              while read -r jail; do
+                jail="$(printf '%s' "$jail" | xargs)"
+                [ -n "$jail" ] && fail2ban-client set "$jail" unbanip "$source_ip" >/dev/null 2>&1 || true
+              done
+          fi
+
+          if command -v csf >/dev/null 2>&1; then
+            csf -dr "$source_ip" >/dev/null 2>&1 || true
+          fi
+          if command -v cscli >/dev/null 2>&1; then
+            cscli decisions delete --ip "$source_ip" >/dev/null 2>&1 || true
+          fi
+          if command -v ipset >/dev/null 2>&1; then
+            while read -r set_name; do
+              [ -n "$set_name" ] || continue
+              ipset test "$set_name" "$source_ip" >/dev/null 2>&1 && ipset del "$set_name" "$source_ip" || true
+            done < <(ipset list -name 2>/dev/null || true)
+          fi
+
+          for deny_file in /etc/hosts.deny /var/lib/denyhosts/hosts /var/lib/denyhosts/hosts-restricted; do
+            if [ -f "$deny_file" ] && grep -Fq "$source_ip" "$deny_file"; then
+              cp -a "$deny_file" "$deny_file.dmp-backup-$(date +%s)"
+              sed -i "\|$source_ip|d" "$deny_file"
+            fi
+          done
+
+          if command -v iptables >/dev/null 2>&1; then
+            iptables -C INPUT -p tcp -s "$source_ip" --dport 22 -j ACCEPT >/dev/null 2>&1 ||
+              iptables -I INPUT 1 -p tcp -s "$source_ip" --dport 22 -j ACCEPT
+          fi
+
+          sshd_bin="$(command -v sshd || true)"
+          [ -n "$sshd_bin" ] || sshd_bin=/usr/sbin/sshd
+          "$sshd_bin" -t
+          echo 'Effective SSH source controls:'
+          "$sshd_bin" -T -C user=root,host=localhost,addr="$source_ip" 2>/dev/null |
+            grep -E '^(allowusers|denyusers|refuseconnection|persource|maxstartups|passwordauthentication|permitrootlogin)' || true
+          echo 'Remaining firewall references to the local source:'
+          { iptables -S 2>/dev/null || true; nft -a list ruleset 2>/dev/null || true; } |
+            grep -F "$source_ip" || true
+          echo 'Recent SSH events for the local source:'
+          journalctl -u ssh -u sshd --since '24 hours ago' --no-pager 2>/dev/null |
+            grep -F "$source_ip" |
+            tail -n 30 || true
+          REMOTE
+
   test:
     runs-on: ubuntu-latest
     steps:
