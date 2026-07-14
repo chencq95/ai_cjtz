@@ -9,7 +9,7 @@ cd "$deploy_dir"
 previous_sha="${PREVIOUS_DEPLOY_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}"
 
 if docker compose ps --status running postgres 2>/dev/null | grep -q postgres; then
-  ./scripts/backup.sh "./backups/pre-deploy-$(date +%Y%m%d-%H%M%S)"
+  bash ./scripts/backup.sh "./backups/pre-deploy-$(date +%Y%m%d-%H%M%S)"
 fi
 
 if [[ "${DEPLOY_SKIP_FETCH:-false}" != "true" ]]; then
