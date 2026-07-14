@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: production-main
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -64,16 +68,30 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
           DEPLOY_SHA: ${{ github.sha }}
         run: |
+          retry() {
+            for attempt in $(seq 1 30); do
+              "$@" && return 0
+              echo "SSH attempt $attempt failed; retrying" >&2
+              sleep 2
+            done
+            return 1
+          }
           git bundle create /tmp/ai-cjtz-deploy.bundle main
-          scp -P 443 \
+          retry scp -P 443 \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o HostKeyAlias="$SERVER_HOST" \
+            -o ConnectTimeout=8 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
             /tmp/ai-cjtz-deploy.bundle \
             "$SERVER_USER@$SERVER_HOST:/tmp/ai-cjtz-deploy.bundle"
-          ssh -p 443 \
+          retry ssh -p 443 \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o HostKeyAlias="$SERVER_HOST" \
+            -o ConnectTimeout=8 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
             "$SERVER_USER@$SERVER_HOST" \
             "set -e; cd /ai_cjtz; previous_sha=\$(git rev-parse HEAD); git fetch /tmp/ai-cjtz-deploy.bundle main; git checkout --detach '$DEPLOY_SHA'; rm -f /tmp/ai-cjtz-deploy.bundle; PREVIOUS_DEPLOY_SHA=\"\$previous_sha\" DEPLOY_SKIP_FETCH=true DEPLOY_SHA='$DEPLOY_SHA' bash scripts/deploy.sh"
