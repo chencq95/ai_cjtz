@@ -167,8 +167,23 @@ class CatalogRepository:
                 first_seen_at=now,
                 last_seen_at=now,
             )
-            self.session.add(state)
-            self.session.flush()
+            # Multiple collections/workers can discover the same entry URL at
+            # the same time.  The database uniqueness constraint is the final
+            # authority, so protect this insert with a savepoint and reload
+            # the winner instead of aborting the whole platform run.
+            try:
+                with self.session.begin_nested():
+                    self.session.add(state)
+                    self.session.flush()
+            except IntegrityError:
+                state = self.session.scalar(
+                    select(UrlState).where(
+                        UrlState.platform_id == platform_id,
+                        UrlState.canonical_url == canonical,
+                    )
+                )
+                if state is None:
+                    raise
         else:
             state.last_seen_at = now
             state.active = True

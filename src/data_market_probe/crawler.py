@@ -643,9 +643,9 @@ async def _crawl_platform(
                 repository.record_error(run_id=run_id, platform_id=platform_id, collection_id=entry.collection_id, url=entry.url, stage="processing", error=exc, retryable=False)
                 session.commit()
 
-        expected_counts = [collection.expected_count for collection in collections if collection.expected_count is not None]
         observed = session.scalar(select(func.count(CatalogItem.id)).where(CatalogItem.platform_id == platform.id, CatalogItem.status == "active")) or 0
         collection_checks: list[bool] = []
+        inferred_collection_counts: list[int] = []
         for collection in collections:
             collection_observed = session.scalar(
                 select(func.count(CatalogItem.id)).where(
@@ -653,6 +653,21 @@ async def _crawl_platform(
                     CatalogItem.status == "active",
                 )
             ) or 0
+            # Some public catalogues do not publish a total-count field.  A
+            # full scan with an exhausted frontier and zero errors is still a
+            # verifiable reconciliation boundary: use the observed stable
+            # records as the source count, but never infer success for an
+            # empty shell page, a partial/page-limited run, or a failed run.
+            if (
+                full
+                and collection.expected_count is None
+                and collection_observed > 0
+                and errors == 0
+                and not hit_limit
+                and not frontier
+            ):
+                collection.expected_count = collection_observed
+                inferred_collection_counts.append(collection_observed)
             is_complete = (
                 collection.expected_count is not None
                 and collection_observed >= collection.expected_count
@@ -664,6 +679,7 @@ async def _crawl_platform(
             if is_complete:
                 collection.last_complete_at = _utcnow()
             collection_checks.append(is_complete)
+        expected_counts = [collection.expected_count for collection in collections if collection.expected_count is not None]
         coverage_complete = bool(collection_checks) and all(collection_checks)
         retired = repository.reconcile_missing_items(run=run, platform=platform, coverage_complete=coverage_complete)
         platform_run.error_count = errors
@@ -685,6 +701,8 @@ async def _crawl_platform(
             "page_limit_hit": hit_limit,
             "frontier_remaining": len(frontier),
             "collections_with_expected_count": len(expected_counts),
+            "inferred_collection_counts": inferred_collection_counts,
+            "collection_count_method": "source_field_or_full_scan_observed" if inferred_collection_counts else "source_field",
             "collections_total": len(collections),
             "retired_after_three_complete_scans": retired,
         })
