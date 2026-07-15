@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright/python:v1.51.0-noble
+FROM mcr.microsoft.com/playwright/python:v1.61.0-noble
 
 ARG PIP_INDEX_URL=https://pypi.org/simple
 
