@@ -427,6 +427,27 @@ async def _crawl_platform(
                 page_role=entry.page_role,
             )
             session.commit()
+            if (
+                platform.adapter == "hubei-public-v1"
+                and any(
+                    marker in entry.url.lower()
+                    for marker in (
+                        "/product/detail/",
+                        "/product/casedetails/",
+                        "/product/preselldetail",
+                        "/merchant?merchantid=",
+                    )
+                )
+            ):
+                # Detail URLs are retained as auditable evidence, while the
+                # public list cards are the canonical Hubei catalog records.
+                # Do not refetch hundreds of unchanged details on every
+                # incremental scan; a future targeted detail adapter can
+                # revisit them when explicitly requested.
+                state.page_role = "detail"
+                state.next_fetch_at = _utcnow() + timedelta(days=30)
+                session.commit()
+                continue
             try:
                 async with fetch_semaphore:
                     result = await fetcher.fetch(
