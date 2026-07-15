@@ -531,7 +531,17 @@ async def _crawl_platform(
 
                 extracted = _extract_result(result, platform)
                 if entry.collection_id:
-                    total_match = re.search(r"共\s*([0-9,，]+)\s*(?:条|个)", extracted.text)
+                    # A homepage/news paragraph can contain an unrelated
+                    # “共 N 个”.  Only accept a source total from a listing,
+                    # API, or an explicitly catalog/product route; otherwise
+                    # the full-scan observed-count reconciliation below is
+                    # used after the frontier is exhausted.
+                    count_context = f"{entry.url} {result.final_url}".lower()
+                    count_page = entry.page_role in {"listing", "api"} or any(
+                        marker in count_context
+                        for marker in ("product", "goods", "catalog", "dataset", "scenario", "component", "demand", "market")
+                    )
+                    total_match = re.search(r"共\s*([0-9,，]+)\s*(?:条|个)", extracted.text) if count_page else None
                     if total_match:
                         collection_row = session.get(SourceCollection, entry.collection_id)
                         if collection_row is not None:
