@@ -469,10 +469,20 @@ async def _crawl_platform(
                     session.commit()
                     continue
 
+                collection_requires_browser = False
+                if entry.collection_id is not None:
+                    collection_row = session.get(SourceCollection, entry.collection_id)
+                    collection_requires_browser = bool(
+                        collection_row and collection_row.pagination_mode == "browser"
+                    )
                 should_render = (
                     renderer.available
                     and platform.render_mode in {"auto", "browser"}
-                    and (platform.render_mode == "browser" or looks_like_spa(result.body, entry.url, result.mime_type))
+                    and (
+                        platform.render_mode == "browser"
+                        or collection_requires_browser
+                        or looks_like_spa(result.body, entry.url, result.mime_type)
+                    )
                 )
                 if should_render:
                     try:
@@ -482,7 +492,11 @@ async def _crawl_platform(
                         # when the SSR shell happens to be larger than it.
                         # Otherwise public cards can be present in the browser
                         # result but silently disappear from extraction.
-                        if platform.render_mode == "browser" or len(rendered.body) >= len(result.body):
+                        if (
+                            platform.render_mode == "browser"
+                            or collection_requires_browser
+                            or len(rendered.body) >= len(result.body)
+                        ):
                             result = rendered
                     except FetchFailure as browser_error:
                         repository.record_error(
