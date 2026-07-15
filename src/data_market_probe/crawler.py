@@ -590,6 +590,14 @@ async def _crawl_platform(
                 platform_run.pages_changed += int(changed)
 
                 for target, anchor, relevance in extracted.links:
+                    if (
+                        platform.adapter == "hubei-public-v1"
+                        and "/product/detail/" in target.lower()
+                    ):
+                        # Stable product cards are already persisted by the
+                        # formal Hubei adapter; do not enqueue every unchanged
+                        # detail anchor discovered in a 304-rendered listing.
+                        continue
                     role = _page_role(target, anchor)
                     if _should_queue(
                         url=target,
