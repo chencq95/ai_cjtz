@@ -149,6 +149,8 @@ def seed_platforms(
                 ("data-products", "数据产品", "product"),
                 ("data-components", "数据组件", "component"),
                 ("data-scenarios", "数据场景", "scenario"),
+                ("demands", "需求", "demand"),
+                ("providers", "数商", "provider"),
             ):
                 _upsert_collection(
                     session,
@@ -171,6 +173,16 @@ def seed_platforms(
                 platform = session.get(Platform, platform_id)
                 if platform is None:
                     continue
+                auto_collection = session.scalar(
+                    select(SourceCollection).where(
+                        SourceCollection.platform_id == platform_id,
+                        SourceCollection.code == "public-catalog-auto",
+                    )
+                )
+                if auto_collection is not None:
+                    auto_collection.enabled = False
+                    auto_collection.coverage_status = "out_of_scope"
+                    auto_collection.notes = "已由站点专用栏目规则覆盖，避免通用入口重复计数"
                 platform.adapter = str(rule.get("adapter") or platform.adapter)
                 platform.render_mode = str(rule.get("render_mode") or platform.render_mode)
                 for item in rule.get("collections", []):

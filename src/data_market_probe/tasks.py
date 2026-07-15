@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from celery import Celery
+from celery.exceptions import Retry
+from redis import Redis
 from sqlalchemy import select
 
 from .crawler import run_crawl
@@ -61,6 +63,16 @@ def execute_crawl(self: Any, task_id: str) -> dict[str, Any]:
         platform_ids = json.loads(record.platform_ids_json or "[]")
         mode = record.mode
         _log(session, task_id, f"开始{mode}采集，平台范围：{platform_ids or '全部'}")
+    crawl_lock = Redis.from_url(str(current_settings.redis_url)).lock(
+        "dmp:crawl:global", timeout=60 * 60 * 13, blocking_timeout=0
+    )
+    if not crawl_lock.acquire(blocking=False):
+        with session_scope(factory) as session:
+            record = session.get(CrawlTask, task_id)
+            if record is not None:
+                record.status = "queued"
+                _log(session, task_id, "已有采集任务运行，等待全局采集锁", "INFO", record.run_id)
+        raise self.retry(countdown=30, max_retries=None)
     try:
         def is_cancelled() -> bool:
             with session_scope(factory) as check_session:
@@ -89,6 +101,8 @@ def execute_crawl(self: Any, task_id: str) -> dict[str, Any]:
                 record.finished_at = datetime.now(timezone.utc)
                 _log(session, task_id, f"采集完成：{result.get('status')}", run_id=record.run_id)
         return result
+    except Retry:
+        raise
     except Exception as exc:
         with session_scope(factory) as session:
             record = session.get(CrawlTask, task_id)
@@ -98,6 +112,11 @@ def execute_crawl(self: Any, task_id: str) -> dict[str, Any]:
                 record.finished_at = datetime.now(timezone.utc)
                 _log(session, task_id, f"采集失败：{exc}", "ERROR", record.run_id)
         raise
+    finally:
+        try:
+            crawl_lock.release()
+        except Exception:
+            pass
 
 
 def dispatch_crawl(

@@ -22,8 +22,8 @@ _hasher = PasswordHasher()
 
 
 def hash_password(password: str) -> str:
-    if len(password) < 10:
-        raise ValueError("password must contain at least 10 characters")
+    if len(password) < 6:
+        raise ValueError("password must contain at least 6 characters")
     return _hasher.hash(password)
 
 
@@ -106,4 +106,3 @@ def write_audit(
             ip_address=request.client.host if request and request.client else "",
         )
     )
-

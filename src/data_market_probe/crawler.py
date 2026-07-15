@@ -268,6 +268,13 @@ async def _crawl_platform(
             raise RuntimeError(f"crawl context missing for platform {platform_id}")
         platform_run = repository.start_platform_run(run, platform.id)
         session.commit()
+        if platform.source_role == "reference":
+            platform_run.status = "out_of_scope"
+            platform_run.coverage_status = "out_of_scope"
+            platform_run.notes = "参考来源，不递归抓取国家数据局政府网站"
+            platform_run.finished_at = _utcnow()
+            session.commit()
+            return {"platform_id": platform.id, "status": "out_of_scope", "coverage": "out_of_scope", "pages": 0, "items": 0, "errors": 0}
         entry_url = canonicalize_url(platform.canonical_url or platform.source_url)
         if not platform.enabled or not entry_url:
             platform_run.status = "no_url"
@@ -637,6 +644,18 @@ async def _crawl_platform(
             "collections_total": len(collections),
             "retired_after_three_complete_scans": retired,
         })
+        if full:
+            if platform.source_role == "reference":
+                platform.onboarding_status = "out_of_scope"
+            elif coverage_complete:
+                platform.onboarding_status = "complete"
+            elif root_blocked:
+                platform.onboarding_status = "blocked"
+            elif fetched == 0:
+                platform.onboarding_status = "offline"
+            else:
+                platform.onboarding_status = "blocked"
+                platform.notes = (platform.notes or "") + "；全量扫描未完成栏目对账，已保留运行证据"
         platform_run.finished_at = _utcnow()
         session.commit()
         return {

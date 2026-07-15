@@ -13,7 +13,7 @@ from croniter import croniter
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
@@ -83,7 +83,7 @@ class LoginRequest(BaseModel):
 
 class PasswordChange(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=10, max_length=256)
+    new_password: str = Field(min_length=6, max_length=256)
 
 
 class PlatformUpdate(BaseModel):
@@ -120,6 +120,25 @@ class ScheduleInput(BaseModel):
     enabled: bool = True
     max_pages: int | None = Field(default=None, ge=1)
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("计划名称不能为空")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("时区无效") from exc
+        return value
+
 
 class TriggerInput(BaseModel):
     mode: Literal["incremental", "full"] = "incremental"
@@ -143,14 +162,14 @@ class MappingInput(BaseModel):
 
 class UserInput(BaseModel):
     username: str = Field(min_length=3, max_length=128)
-    password: str = Field(min_length=10, max_length=256)
+    password: str = Field(min_length=6, max_length=256)
     role: Literal["admin", "readonly"] = "readonly"
 
 
 class UserUpdate(BaseModel):
     role: Literal["admin", "readonly"] | None = None
     enabled: bool | None = None
-    password: str | None = Field(default=None, min_length=10, max_length=256)
+    password: str | None = Field(default=None, min_length=6, max_length=256)
 
 
 def _task_payload(row: CrawlTask) -> dict[str, Any]:

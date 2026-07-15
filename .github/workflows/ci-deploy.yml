@@ -95,3 +95,25 @@ jobs:
             -o ServerAliveCountMax=4 \
             "$SERVER_USER@$SERVER_HOST" \
             "set -e; cd /ai_cjtz; previous_sha=\$(git rev-parse HEAD); git fetch /tmp/ai-cjtz-deploy.bundle main; git checkout --detach '$DEPLOY_SHA'; rm -f /tmp/ai-cjtz-deploy.bundle; PREVIOUS_DEPLOY_SHA=\"\$previous_sha\" DEPLOY_SKIP_FETCH=true DEPLOY_SHA='$DEPLOY_SHA' bash scripts/deploy.sh"
+      - name: Validate production and enqueue the first full crawl
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          retry() {
+            for attempt in $(seq 1 30); do
+              "$@" && return 0
+              echo "SSH validation attempt $attempt failed; retrying" >&2
+              sleep 2
+            done
+            return 1
+          }
+          retry ssh -p 443 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o HostKeyAlias="$SERVER_HOST" \
+            -o ConnectTimeout=8 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            "$SERVER_USER@$SERVER_HOST" \
+            "set -e; cd /ai_cjtz; mkdir -p reports; docker compose exec -T api python scripts/production_validate.py --enqueue-full-if-empty | tee reports/production-validation-latest.json"
