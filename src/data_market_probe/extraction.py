@@ -359,9 +359,22 @@ def extract_html(
         items.append(_build_item(kind=kind, name=name, source_url=url, values=fields, evidence=evidence, confidence=score, platform_province=platform_province, platform_city=platform_city))
 
     # Preserve list-only catalog cards so inaccessible details do not erase public listings.
-    if any(term.lower() in f"{title} {url}".lower() for term in TARGET_TERMS):
+    if "ahdexc.com" in url.lower() or any(term.lower() in f"{title} {url}".lower() for term in TARGET_TERMS):
         card_selectors = ".product-item, .goods-item, .data-item, .scenario-item, .scene-item, [class*='product-card'], [class*='goods-card']"
         cards = list(soup.select(card_selectors))
+        # Several public SPA catalogues (including Anhui) render cards as
+        # clickable divs without an <a href>.  Keep those cards instead of
+        # dropping the entire public catalogue.  The page route provides the
+        # entity kind and the normalized card name is used as a stable source
+        # identifier; the raw page URL remains the evidence location.
+        if "ahdexc.com" in url.lower():
+            route = urlsplit(url).path.lower()
+            if route.endswith("/factormarket"):
+                cards.extend(soup.select(".card-box, .panel-item-box"))
+            elif route.endswith("/businesshall"):
+                cards.extend(soup.select(".card-box"))
+            elif route.endswith("/specialzone"):
+                cards.extend(soup.select(".scene-item-box, .special-item"))
         cards.extend(
             soup.select(
                 "a[href*='/product/detail/'], a[href*='/goods/detail/'], "
@@ -372,29 +385,42 @@ def extract_html(
         seen_card_urls: set[str] = set()
         for index, card in enumerate(cards):
             anchor = card if card.name == "a" and card.get("href") else card.find("a", href=True)
-            if not isinstance(anchor, Tag):
-                continue
-            target = canonicalize_url(url, str(anchor.get("href")))
+            target = canonicalize_url(url, str(anchor.get("href"))) if isinstance(anchor, Tag) else ""
+            card_text = normalize_text(card.get_text(" ", strip=True))
+            if not target and "ahdexc.com" in url.lower():
+                target = canonicalize_url(url, url)
             if not target or target in seen_card_urls:
-                continue
-            seen_card_urls.add(target)
-            name_node = anchor.select_one(
+                # A div card has no unique URL.  It is deduplicated below by
+                # its stable synthetic external ID instead.
+                if not (not anchor and "ahdexc.com" in url.lower()):
+                    continue
+            else:
+                seen_card_urls.add(target)
+            name_node = card.select_one(
+                ".content-title, .title-left, .scene-item-title, .special-item-title, "
                 ".content-title .title, .product-title, .goods-title, "
                 ".card-title, [class~='title'], h2, h3, h4"
             )
             card_name = normalize_text(
-                name_node.get_text(" ", strip=True) if name_node else anchor.get_text(" ", strip=True)
+                name_node.get_text(" ", strip=True) if name_node else card_text
             )
             if not target or not (2 <= len(card_name) <= 300) or card_name in GENERIC_NAMES:
                 continue
-            if any(existing.source_url == target for existing in items):
+            if any(existing.external_id == f"ahdexc:{card_name}" for existing in items):
                 continue
-            card_text = normalize_text(anchor.get_text(" ", strip=True))
-            provider_node = anchor.select_one(".product-org, .provider, [class*='provider']")
-            values = {
-                "external_id": _external_id_from_url(target),
-                "description": safe_snippet(card_text, 2_000),
-            }
+            provider_node = card.select_one(".product-org, .provider, [class*='provider']")
+            if "ahdexc.com" in url.lower() and not anchor:
+                # Preserve a stable key even though the SPA does not expose a
+                # detail URL in the public DOM.
+                values = {
+                    "external_id": f"ahdexc:{card_name}",
+                    "description": safe_snippet(card_text, 2_000),
+                }
+            else:
+                values = {
+                    "external_id": _external_id_from_url(target),
+                    "description": safe_snippet(card_text, 2_000),
+                }
             if provider_node:
                 values["provider"] = normalize_text(provider_node.get_text(" ", strip=True))
             delivery_match = re.search(

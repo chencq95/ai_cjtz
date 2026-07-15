@@ -89,6 +89,23 @@ def test_utility_class_product_links_are_preserved_as_catalog_items() -> None:
     assert item.source_url == "https://exchange.example/product/detail/1904"
 
 
+def test_anhui_public_spa_div_cards_keep_stable_ids_without_links() -> None:
+    page = extract_html(
+        """
+        <html><head><title>产品大厅</title></head><body>
+          <div class="card-box"><div class="content-title">公开产品 A</div>
+            <div class="content-box-second-content">产品简介 A</div></div>
+          <div class="card-box"><div class="content-title">公开产品 B</div>
+            <div class="content-box-second-content">产品简介 B</div></div>
+        </body></html>
+        """,
+        "https://www.ahdexc.com/factorMarket",
+    )
+
+    assert [item.name for item in page.items] == ["公开产品 A", "公开产品 B"]
+    assert [item.external_id for item in page.items] == ["ahdexc:公开产品 A", "ahdexc:公开产品 B"]
+
+
 def test_json_catalog_records_are_extracted_without_html() -> None:
     page = extract_json(
         {
