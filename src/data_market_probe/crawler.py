@@ -642,7 +642,7 @@ async def _crawl_platform(
                 for capture in result.captured:
                     if (
                         platform.adapter == "hubei-public-v1"
-                        and "/product/detail/" in capture.url.lower()
+                        and "/product/detail/" in capture.final_url.lower()
                     ):
                         # The list cards already carry the public stable ID,
                         # name, dimensions and evidence.  Re-processing every
