@@ -552,6 +552,10 @@ async def _crawl_platform(
                     )
                     total_match = re.search(r"共\s*([0-9,，]+)\s*(?:条|个)", extracted.text) if count_page else None
                     if total_match:
+                        nearby = extracted.text[max(0, total_match.start() - 80): total_match.end() + 80]
+                        if not re.search(r"数据产品|数据商品|产品|商品|数据集|数据服务|数据组件|组件|场景|需求|数商|catalog|product|dataset|component|scenario|demand", nearby, re.I):
+                            total_match = None
+                    if total_match:
                         collection_row = session.get(SourceCollection, entry.collection_id)
                         if collection_row is not None:
                             collection_row.expected_count = int(total_match.group(1).replace(",", "").replace("，", ""))
