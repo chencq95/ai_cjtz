@@ -321,6 +321,15 @@ async def _crawl_platform(
                 SourceCollection.enabled.is_(True),
             )
         ).all()
+        if full:
+            # expected_count is a run-time reconciliation watermark, not a
+            # permanent configuration value.  Recompute it on every full
+            # scan so a stale homepage/news count cannot keep a platform
+            # falsely COMPLETE forever.
+            for collection in collections:
+                collection.expected_count = None
+                collection.coverage_status = "unknown"
+            session.flush()
         frontier: list[QueueEntry] = []
         enqueued: set[str] = set()
         visited: set[str] = set()
