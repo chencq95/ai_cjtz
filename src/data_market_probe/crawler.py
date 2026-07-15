@@ -632,6 +632,16 @@ async def _crawl_platform(
                         enqueue(extracted_item.source_url, depth=entry.depth + 1, discovered_from=entry.url, anchor=extracted_item.name, collection_id=entry.collection_id, role="detail", force=True)
 
                 for capture in result.captured:
+                    if (
+                        platform.adapter == "hubei-public-v1"
+                        and "/product/detail/" in capture.url.lower()
+                    ):
+                        # The list cards already carry the public stable ID,
+                        # name, dimensions and evidence.  Re-processing every
+                        # unchanged detail response captured by Playwright
+                        # makes a full scan fan out into hundreds of browser
+                        # jobs without adding data.
+                        continue
                     await _process_capture(
                         capture=capture,
                         platform=platform,
