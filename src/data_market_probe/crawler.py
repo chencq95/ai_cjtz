@@ -593,7 +593,14 @@ async def _crawl_platform(
                     platform_run.items_seen += 1
                     platform_run.items_new += int(event == "added")
                     platform_run.items_updated += int(event in {"updated", "recovered"})
-                    enqueue(extracted_item.source_url, depth=entry.depth + 1, discovered_from=entry.url, anchor=extracted_item.name, collection_id=entry.collection_id, role="detail", force=True)
+                    # Hubei's public SPA exposes stable, complete catalog
+                    # cards (including detail URLs) but keeps expanding
+                    # category/detail links indefinitely. Persist the card
+                    # and evidence without turning every card into another
+                    # browser job; later incremental runs can revisit a
+                    # stored URL when its hash changes.
+                    if platform.adapter != "hubei-public-v1":
+                        enqueue(extracted_item.source_url, depth=entry.depth + 1, discovered_from=entry.url, anchor=extracted_item.name, collection_id=entry.collection_id, role="detail", force=True)
 
                 for capture in result.captured:
                     await _process_capture(
