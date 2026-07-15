@@ -51,6 +51,20 @@ def test_typed_product_route_wins_over_scenario_copy() -> None:
     assert page.items[0].kind == "product"
 
 
+def test_detail_route_title_is_retained_without_label_table() -> None:
+    page = extract_html(
+        """
+        <html><head><title>企业碳排放核算数据服务</title></head><body>
+          <h1>企业碳排放核算数据服务</h1>
+          <p>公开详情页只提供标题和详情路由。</p>
+        </body></html>
+        """,
+        "https://exchange.example/data/detail/abc123",
+    )
+    assert len(page.items) == 1
+    assert page.items[0].name == "企业碳排放核算数据服务"
+
+
 def test_utility_class_product_links_are_preserved_as_catalog_items() -> None:
     page = extract_html(
         """

@@ -347,7 +347,13 @@ def extract_html(
         marker in path_lower
         for marker in ("/list", "/catalog", "/search", "/index")
     ) or path_lower.endswith(("/product", "/goods", "/dataset", "/scenario", "/demand"))
-    if name and score >= 4.5 and (not list_like_page or bool(fields.get("name"))):
+    # Public exchange detail pages often expose only a meaningful <title> and
+    # a stable detail URL; requiring table fields would silently drop those
+    # records.  Keep the stricter threshold for ordinary pages, but allow a
+    # title-only item when the URL is an explicit detail/product route.
+    detail_route = any(term in path_lower for term in DETAIL_PATH_TERMS)
+    minimum_score = 3.0 if detail_route else 4.5
+    if name and score >= minimum_score and (not list_like_page or bool(fields.get("name"))):
         fields.setdefault("description", _description(soup, fields))
         fields.setdefault("external_id", _external_id_from_url(url))
         items.append(_build_item(kind=kind, name=name, source_url=url, values=fields, evidence=evidence, confidence=score, platform_province=platform_province, platform_city=platform_city))
