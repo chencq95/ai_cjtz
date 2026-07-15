@@ -68,7 +68,14 @@ def execute_crawl(self: Any, task_id: str) -> dict[str, Any]:
     if not crawl_lock.acquire(blocking=False):
         with session_scope(factory) as session:
             record = session.get(CrawlTask, task_id)
-            if record is not None:
+            if record is None:
+                return {"task_id": task_id, "status": "cancelled", "reason": "task not found"}
+            if record.cancel_requested or record.status in {"cancelled", "failed", "success", "partial"}:
+                record.status = "cancelled" if record.cancel_requested else record.status
+                record.finished_at = datetime.now(timezone.utc) if record.cancel_requested else record.finished_at
+                _log(session, task_id, "任务在等待采集锁时已取消，不再重新入队", "WARNING", record.run_id)
+                return {"task_id": task_id, "status": "cancelled", "reason": "task cancelled while waiting"}
+            else:
                 record.status = "queued"
                 _log(session, task_id, "已有采集任务运行，等待全局采集锁", "INFO", record.run_id)
         # Celery's retry counter can still exhaust when a task waits behind a

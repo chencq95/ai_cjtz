@@ -58,7 +58,12 @@ class Settings(BaseSettings):
     browser_timeout_seconds: float = Field(default=45.0, gt=0, le=300)
     browser_settle_milliseconds: int = Field(default=1_500, ge=0, le=30_000)
     browser_pagination_enabled: bool = True
-    browser_max_pagination_pages: int = Field(default=300, ge=1, le=2000)
+    # Browser adapters must have a finite, conservative page budget.  Some
+    # public SPAs keep a "next" control enabled even when no new records are
+    # returned; a lower default prevents a single source from monopolising
+    # the global crawl lock for hours.  Individual sources can still raise
+    # this explicitly when their pagination contract is known to terminate.
+    browser_max_pagination_pages: int = Field(default=50, ge=1, le=2000)
 
     # Incremental jobs re-read a small overlap window to catch late edits. A
     # periodic full recheck catches removals and sites without reliable dates.
