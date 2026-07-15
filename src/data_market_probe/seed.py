@@ -121,6 +121,10 @@ def seed_platforms(
             else:
                 skipped += 1
 
+            # Seeding is also used to apply new site rules in an existing
+            # database.  Do not erase a crawl's auditable terminal conclusion
+            # merely because the seed CSV was re-read during deployment.
+            terminal_statuses = {"complete", "blocked", "offline", "out_of_scope"}
             if platform_id == 38:
                 platform.source_role = "reference"
                 platform.onboarding_status = "out_of_scope"
@@ -128,7 +132,7 @@ def seed_platforms(
                 platform.onboarding_status = "blocked"
             elif platform.url_status in {"tls_cert_expired", "site_expired"}:
                 platform.onboarding_status = "offline"
-            else:
+            elif platform.onboarding_status not in terminal_statuses:
                 platform.onboarding_status = "pending_audit"
 
             entry_url = (row.get("canonical_url") or row.get("source_url") or "").strip()
