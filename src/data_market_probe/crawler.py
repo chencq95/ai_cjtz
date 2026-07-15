@@ -451,6 +451,7 @@ async def _crawl_platform(
                     browser_refresh = (
                         renderer.available
                         and platform.render_mode in {"auto", "browser"}
+                        and platform.adapter != "hubei-public-v1"
                         and (platform.render_mode == "browser" or collection_requires_browser)
                     )
                     if browser_refresh:
