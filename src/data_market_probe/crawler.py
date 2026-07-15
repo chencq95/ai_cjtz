@@ -478,7 +478,11 @@ async def _crawl_platform(
                     try:
                         async with fetch_semaphore:
                             rendered = await renderer.render(entry.url, allowed_families=allowed_families)
-                        if len(rendered.body) >= len(result.body):
+                        # A formal browser adapter owns the rendered DOM even
+                        # when the SSR shell happens to be larger than it.
+                        # Otherwise public cards can be present in the browser
+                        # result but silently disappear from extraction.
+                        if platform.render_mode == "browser" or len(rendered.body) >= len(result.body):
                             result = rendered
                     except FetchFailure as browser_error:
                         repository.record_error(
