@@ -20,13 +20,15 @@ git checkout --detach "$deploy_sha"
 rollback() {
   if [[ -n "$previous_sha" ]]; then
     git checkout --detach "$previous_sha"
-    docker compose up -d --build --remove-orphans
+    docker compose build --pull
+    docker compose up -d --remove-orphans
   fi
 }
 trap rollback ERR
 
 docker compose config --quiet
-docker compose up -d --build --remove-orphans
+docker compose build --pull
+docker compose up -d --remove-orphans
 
 for _ in $(seq 1 60); do
   if curl --fail --silent "$health_url" >/dev/null; then
