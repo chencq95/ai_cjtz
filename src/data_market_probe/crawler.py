@@ -427,23 +427,47 @@ async def _crawl_platform(
                         last_modified=state.last_modified,
                     )
                 state.robots_allowed = True
+                collection_requires_browser = False
+                if entry.collection_id is not None:
+                    collection_row = session.get(SourceCollection, entry.collection_id)
+                    collection_requires_browser = bool(
+                        collection_row and collection_row.pagination_mode == "browser"
+                    )
+                rendered_from_not_modified = False
                 if result.status_code == 304:
-                    repository.mark_not_modified(state, 304, result.headers)
-                    state.next_fetch_at = _due_at(state.page_role, False, full)
-                    fetched += 1
-                    platform_run.pages_fetched += 1
-                    stored_links = session.scalars(
-                        select(PageLink).where(
-                            PageLink.from_url_state_id == state.id,
-                            PageLink.active.is_(True),
-                        )
-                    ).all()
-                    for link in stored_links:
-                        role = _page_role(link.to_url, link.anchor_text)
-                        enqueue(link.to_url, depth=entry.depth + 1, discovered_from=entry.url, anchor=link.anchor_text, collection_id=entry.collection_id, role=role)
-                    platform_run.urls_discovered = len(visited) + len(frontier)
-                    session.commit()
-                    continue
+                    # A 304 only describes the HTTP shell. Browser-backed
+                    # collections can still have changed DOM/API data, so
+                    # refresh them through Playwright before deciding that
+                    # nothing needs parsing.
+                    browser_refresh = (
+                        renderer.available
+                        and platform.render_mode in {"auto", "browser"}
+                        and (platform.render_mode == "browser" or collection_requires_browser)
+                    )
+                    if browser_refresh:
+                        try:
+                            async with fetch_semaphore:
+                                result = await renderer.render(entry.url, allowed_families=allowed_families)
+                            rendered_from_not_modified = True
+                        except FetchFailure:
+                            browser_refresh = False
+                    if not browser_refresh:
+                        repository.mark_not_modified(state, 304, result.headers)
+                        state.next_fetch_at = _due_at(state.page_role, False, full)
+                        fetched += 1
+                        platform_run.pages_fetched += 1
+                        stored_links = session.scalars(
+                            select(PageLink).where(
+                                PageLink.from_url_state_id == state.id,
+                                PageLink.active.is_(True),
+                            )
+                        ).all()
+                        for link in stored_links:
+                            role = _page_role(link.to_url, link.anchor_text)
+                            enqueue(link.to_url, depth=entry.depth + 1, discovered_from=entry.url, anchor=link.anchor_text, collection_id=entry.collection_id, role=role)
+                        platform_run.urls_discovered = len(visited) + len(frontier)
+                        session.commit()
+                        continue
                 if result.status_code >= 400:
                     if entry.page_role == "sitemap" and result.status_code in {404, 410}:
                         state.http_status = result.status_code
@@ -469,15 +493,10 @@ async def _crawl_platform(
                     session.commit()
                     continue
 
-                collection_requires_browser = False
-                if entry.collection_id is not None:
-                    collection_row = session.get(SourceCollection, entry.collection_id)
-                    collection_requires_browser = bool(
-                        collection_row and collection_row.pagination_mode == "browser"
-                    )
                 should_render = (
                     renderer.available
                     and platform.render_mode in {"auto", "browser"}
+                    and not rendered_from_not_modified
                     and (
                         platform.render_mode == "browser"
                         or collection_requires_browser
