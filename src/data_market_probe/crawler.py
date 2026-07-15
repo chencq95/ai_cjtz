@@ -465,15 +465,21 @@ async def _crawl_platform(
                         state.next_fetch_at = _due_at(state.page_role, False, full)
                         fetched += 1
                         platform_run.pages_fetched += 1
-                        stored_links = session.scalars(
-                            select(PageLink).where(
-                                PageLink.from_url_state_id == state.id,
-                                PageLink.active.is_(True),
-                            )
-                        ).all()
-                        for link in stored_links:
-                            role = _page_role(link.to_url, link.anchor_text)
-                            enqueue(link.to_url, depth=entry.depth + 1, discovered_from=entry.url, anchor=link.anchor_text, collection_id=entry.collection_id, role=role)
+                        # Hubei's browser adapter already persisted the full
+                        # public card set on the previous scan.  A 304 on the
+                        # listing must not fan out into hundreds of unchanged
+                        # detail pages; the next full scan will revisit the
+                        # listing and enqueue only newly discovered cards.
+                        if platform.adapter != "hubei-public-v1":
+                            stored_links = session.scalars(
+                                select(PageLink).where(
+                                    PageLink.from_url_state_id == state.id,
+                                    PageLink.active.is_(True),
+                                )
+                            ).all()
+                            for link in stored_links:
+                                role = _page_role(link.to_url, link.anchor_text)
+                                enqueue(link.to_url, depth=entry.depth + 1, discovered_from=entry.url, anchor=link.anchor_text, collection_id=entry.collection_id, role=role)
                         platform_run.urls_discovered = len(visited) + len(frontier)
                         session.commit()
                         continue
