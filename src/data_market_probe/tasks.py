@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from celery import Celery
-from celery.exceptions import Retry
 from redis import Redis
 from sqlalchemy import select
 
@@ -72,7 +71,11 @@ def execute_crawl(self: Any, task_id: str) -> dict[str, Any]:
             if record is not None:
                 record.status = "queued"
                 _log(session, task_id, "已有采集任务运行，等待全局采集锁", "INFO", record.run_id)
-        raise self.retry(countdown=30, max_retries=None)
+        # Celery's retry counter can still exhaust when a task waits behind a
+        # long full crawl.  Requeue explicitly instead, keeping the database
+        # task queued and avoiding MaxRetriesExceededError.
+        self.apply_async(args=(task_id,), countdown=30)
+        return {"task_id": task_id, "status": "queued", "reason": "crawl lock busy"}
     try:
         def is_cancelled() -> bool:
             with session_scope(factory) as check_session:
@@ -101,8 +104,6 @@ def execute_crawl(self: Any, task_id: str) -> dict[str, Any]:
                 record.finished_at = datetime.now(timezone.utc)
                 _log(session, task_id, f"采集完成：{result.get('status')}", run_id=record.run_id)
         return result
-    except Retry:
-        raise
     except Exception as exc:
         with session_scope(factory) as session:
             record = session.get(CrawlTask, task_id)
