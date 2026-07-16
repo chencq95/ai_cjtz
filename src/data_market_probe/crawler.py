@@ -398,7 +398,7 @@ async def _crawl_public_api_platform(
         if (
             full
             and bool(request.get("resume_after_page_limit", False))
-            and collection.coverage_status == "partial"
+            and collection.expected_count is None
         ):
             last_page = _last_successful_api_page(session, collection.id, endpoint)
             if last_page >= configured_page_start:
