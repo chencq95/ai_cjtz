@@ -52,13 +52,24 @@ def _upsert_collection(
     coverage_status: str = "unknown",
     notes: str = "",
 ) -> SourceCollection:
-    collection = session.scalar(
+    collection = next(
+        (
+            pending
+            for pending in session.new
+            if isinstance(pending, SourceCollection)
+            and pending.platform_id == platform_id
+            and pending.code == code
+        ),
+        None,
+    )
+    collection = collection or session.scalar(
         select(SourceCollection).where(
             SourceCollection.platform_id == platform_id,
             SourceCollection.code == code,
         )
     )
-    if collection is None:
+    is_new = collection is None
+    if is_new:
         collection = SourceCollection(
             platform_id=platform_id,
             code=code,
@@ -74,7 +85,8 @@ def _upsert_collection(
     collection.adapter_version = adapter if adapter != "generic" else "generic-v1"
     collection.enabled = enabled
     collection.pagination_mode = pagination_mode
-    collection.coverage_status = coverage_status
+    if is_new or collection.coverage_status in {"unknown", "out_of_scope"}:
+        collection.coverage_status = coverage_status
     if notes:
         collection.notes = notes
     return collection
@@ -124,7 +136,7 @@ def seed_platforms(
             # Seeding is also used to apply new site rules in an existing
             # database.  Do not erase a crawl's auditable terminal conclusion
             # merely because the seed CSV was re-read during deployment.
-            terminal_statuses = {"complete", "blocked", "offline", "out_of_scope"}
+            terminal_statuses = {"active", "complete", "blocked", "offline", "out_of_scope"}
             if platform_id == 38:
                 platform.source_role = "reference"
                 platform.onboarding_status = "out_of_scope"

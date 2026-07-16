@@ -8,6 +8,7 @@ from data_market_probe.bootstrap import ensure_defaults
 from data_market_probe.database import session_factory, session_scope
 from data_market_probe.models import CrawlSchedule, Platform, SourceCollection, User
 from data_market_probe.object_store import FilesystemObjectStore
+from data_market_probe.seed import _upsert_collection
 from data_market_probe.settings import Settings
 
 
@@ -46,3 +47,28 @@ def test_bootstrap_creates_38_sources_roles_collections_and_schedules(tmp_path: 
         )
         assert enabled_hubei >= 5
 
+
+def test_collection_upsert_sees_pending_rows_with_autoflush_disabled(db_session) -> None:
+    first = _upsert_collection(
+        db_session,
+        platform_id=1,
+        code="data-products",
+        name="数据产品",
+        object_kind="product",
+        entry_url="https://example.com",
+        adapter="generic",
+        enabled=False,
+    )
+    second = _upsert_collection(
+        db_session,
+        platform_id=1,
+        code="data-products",
+        name="数据产品",
+        object_kind="product",
+        entry_url="https://example.com/api",
+        adapter="public-api-v1",
+        enabled=True,
+    )
+    assert first is second
+    assert second.entry_url == "https://example.com/api"
+    assert len([row for row in db_session.new if isinstance(row, SourceCollection)]) == 1
