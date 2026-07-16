@@ -68,11 +68,16 @@ def upgrade() -> None:
             ),
             {"duplicate_ids": duplicate_ids},
         )
-    with op.batch_alter_table("source_collection") as batch_op:
-        batch_op.create_unique_constraint(
-            "uq_collection_platform_code",
-            ["platform_id", "code"],
-        )
+    constraint_names = {
+        constraint["name"]
+        for constraint in sa.inspect(bind).get_unique_constraints("source_collection")
+    }
+    if "uq_collection_platform_code" not in constraint_names:
+        with op.batch_alter_table("source_collection") as batch_op:
+            batch_op.create_unique_constraint(
+                "uq_collection_platform_code",
+                ["platform_id", "code"],
+            )
 
 
 def downgrade() -> None:
