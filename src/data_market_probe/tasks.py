@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from .crawler import run_crawl
 from .database import init_database, session_factory, session_scope
-from .enrichment import enrich_pending_reviews
+from .enrichment import auto_resolve_pending_reviews, enrich_pending_reviews
 from .models import CrawlTask, RunLog
 from .settings import get_settings
 from .utils import json_dumps
@@ -99,6 +99,8 @@ def execute_crawl(self: Any, task_id: str) -> dict[str, Any]:
                 cancel_check=is_cancelled,
             )
         )
+        review_result = auto_resolve_pending_reviews(current_settings)
+        result["automatic_reviews"] = review_result
         with session_scope(factory) as session:
             record = session.get(CrawlTask, task_id)
             if record is not None:

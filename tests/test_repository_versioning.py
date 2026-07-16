@@ -8,6 +8,7 @@ from data_market_probe.extraction import Dimension, Evidence, ExtractedItem
 from data_market_probe.models import (
     CatalogItem,
     CatalogItemVersion,
+    ClassificationReview,
     EntitySourceLink,
     ItemDimension,
     ChangeEvent,
@@ -141,3 +142,26 @@ def test_same_name_and_provider_link_across_platforms(db_session) -> None:
     assert len(links) == 2
     assert links[0].entity_id == links[1].entity_id
     assert links[1].match_method == "exact_name_provider"
+
+
+def test_low_confidence_review_is_automatically_resolved(db_session) -> None:
+    platform = Platform(id=1, name="测试交易所")
+    run = CrawlRun(mode="incremental")
+    state = UrlState(platform_id=1, canonical_url="https://example.com/product/1")
+    db_session.add_all([platform, run, state])
+    db_session.flush()
+    extracted = _item("简介")
+    extracted.confidence = 0.5
+    CatalogRepository(db_session, automatic_review=True).upsert_item(
+        platform=platform,
+        collection_id=None,
+        source_state=state,
+        run=run,
+        snapshot=None,
+        extracted=extracted,
+    )
+    review = db_session.scalar(select(ClassificationReview))
+    assert review is not None
+    assert review.status == "accepted"
+    assert review.reviewer == "automatic_classifier"
+    assert review.reviewed_at is not None

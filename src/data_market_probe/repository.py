@@ -116,11 +116,13 @@ class CatalogRepository:
         object_store: ObjectStore | None = None,
         raw_retention_days: int = 365,
         review_threshold: float = 0.80,
+        automatic_review: bool = True,
     ):
         self.session = session
         self.object_store = object_store
         self.raw_retention_days = raw_retention_days
         self.review_threshold = review_threshold
+        self.automatic_review = automatic_review
 
     def create_run(self, mode: str, trigger: str, config: dict[str, Any]) -> CrawlRun:
         run = CrawlRun(mode=mode, trigger=trigger, config_json=json_dumps(config))
@@ -437,6 +439,7 @@ class CatalogRepository:
             extracted.confidence,
         )
         if product_type_confidence < self.review_threshold:
+            reviewed_at = utcnow() if self.automatic_review else None
             self.session.add(
                 ClassificationReview(
                     item_id=item.id,
@@ -444,6 +447,10 @@ class CatalogRepository:
                     field_name="product_type",
                     proposed_value=extracted.product_type,
                     confidence=product_type_confidence,
+                    status="accepted" if self.automatic_review else "pending",
+                    reviewer="automatic_classifier" if self.automatic_review else "",
+                    reviewed_at=reviewed_at,
+                    decision_note="automatic_rule_accept" if self.automatic_review else "",
                 )
             )
         self.session.add(

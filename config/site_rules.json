@@ -29,6 +29,7 @@
         "enabled": true, "pagination_mode": "api",
         "request": {
           "method": "POST", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 100,
+          "resume_after_page_limit": true,
           "payload": {"SORT": 0, "SSZQ": "5", "ISSW": 2, "KSRQ": "", "JSRQ": ""},
           "records_path": "data"
         }

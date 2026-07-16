@@ -8,10 +8,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from data_market_probe.crawler import _crawl_platform
+from data_market_probe.crawler import _crawl_platform, _last_successful_api_page
 from data_market_probe.database import create_db_engine
 from data_market_probe.fetching import FetchResult
-from data_market_probe.models import Base, CatalogItem, CrawlRun, Platform, PlatformRun, SourceCollection
+from data_market_probe.models import Base, CatalogItem, CrawlRun, Platform, PlatformRun, SourceCollection, UrlState
 
 
 class _RateLimiter:
@@ -158,9 +158,33 @@ async def test_public_api_adapter_paginates_persists_evidence_and_reconciles(
         assert platform_run is not None
         assert platform_run.expected_count == 2
         assert platform_run.observed_count == 2
+        assert json.loads(platform_run.completeness_json)["first_page_checks"][0]["record_count"] == 2
+        assert session.get(Platform, 101).onboarding_status == "active"
         items = list(session.scalars(select(CatalogItem).where(CatalogItem.platform_id == 101)))
         assert {item.kind for item in items} == {"product"}
         assert {item.external_id for item in items} == {"p-1", "p-2"}
 
     Base.metadata.drop_all(engine)
     engine.dispose()
+
+
+def test_resumable_full_scan_uses_last_successful_api_page(db_session) -> None:
+    collection = SourceCollection(
+        platform_id=1,
+        code="data-products",
+        name="数据产品",
+        object_kind="product",
+        entry_url="https://example.com/public/products",
+        coverage_status="partial",
+    )
+    db_session.add_all([Platform(id=1, name="测试交易所"), collection])
+    db_session.flush()
+    db_session.add_all(
+        [
+            UrlState(platform_id=1, collection_id=collection.id, canonical_url="https://example.com/public/products?_dmp_page=1", page_role="api", http_status=200),
+            UrlState(platform_id=1, collection_id=collection.id, canonical_url="https://example.com/public/products?_dmp_page=1000", page_role="api", http_status=200),
+            UrlState(platform_id=1, collection_id=collection.id, canonical_url="https://example.com/public/products?_dmp_page=1001", page_role="api", http_status=500),
+        ]
+    )
+    db_session.flush()
+    assert _last_successful_api_page(db_session, collection.id, collection.entry_url) == 1000

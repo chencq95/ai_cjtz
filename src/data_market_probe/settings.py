@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     incremental_overlap_days: int = Field(default=3, ge=0, le=90)
     full_recheck_days: int = Field(default=30, ge=1, le=365)
     classification_review_threshold: float = Field(default=0.80, ge=0, le=1)
+    automatic_classification_review: bool = True
+    incremental_unchanged_pages: int = Field(default=2, ge=1, le=20)
     llm_enabled: bool = False
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""

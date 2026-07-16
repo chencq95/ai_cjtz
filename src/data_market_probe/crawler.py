@@ -43,7 +43,7 @@ from .models import (
 from .object_store import ObjectStore, build_object_store
 from .repository import CatalogRepository
 from .seed import seed_platforms
-from .utils import canonicalize_url, json_dumps, normalize_text, registrable_host
+from .utils import canonicalize_url, json_dumps, normalize_text, registrable_host, sha256_text
 
 
 logger = logging.getLogger(__name__)
@@ -177,6 +177,26 @@ def _api_page_url(endpoint: str, page: int) -> str:
     marker = urlencode({"_dmp_page": page})
     query = f"{query}&{marker}" if query else marker
     return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
+
+
+def _last_successful_api_page(session: Any, collection_id: int, endpoint: str) -> int:
+    """Return the highest persisted successful page for resumable full scans."""
+
+    prefix = canonicalize_url(endpoint).split("?", 1)[0]
+    urls = session.scalars(
+        select(UrlState.canonical_url).where(
+            UrlState.collection_id == collection_id,
+            UrlState.page_role == "api",
+            UrlState.http_status.between(200, 299),
+            UrlState.canonical_url.like(f"{prefix}%_dmp_page=%"),
+        )
+    ).all()
+    pages = []
+    for url in urls:
+        match = re.search(r"(?:[?&])_dmp_page=(\d+)", url)
+        if match:
+            pages.append(int(match.group(1)))
+    return max(pages, default=0)
 
 
 def _apply_collection_kind(extracted: ExtractedPage, collection: SourceCollection | None) -> None:
@@ -350,6 +370,9 @@ async def _crawl_public_api_platform(
     hit_limit = False
     was_cancelled = False
     collection_failures: list[str] = []
+    first_page_checks: list[dict[str, Any]] = []
+    resumed_collections: list[dict[str, Any]] = []
+    incremental_stops: list[dict[str, Any]] = []
 
     for configured in site_rule.get("collections", []):
         if cancel_check is not None and cancel_check():
@@ -370,7 +393,19 @@ async def _crawl_public_api_platform(
             continue
         page_field = str(request.get("page_field") or "pageNo")
         page_size_field = str(request.get("page_size_field") or "pageSize")
-        page = int(request.get("page_start", 1))
+        configured_page_start = int(request.get("page_start", 1))
+        page = configured_page_start
+        if (
+            full
+            and bool(request.get("resume_after_page_limit", False))
+            and collection.coverage_status == "partial"
+        ):
+            last_page = _last_successful_api_page(session, collection.id, endpoint)
+            if last_page >= configured_page_start:
+                page = last_page + 1
+                resumed_collections.append(
+                    {"collection": collection.code, "last_successful_page": last_page, "resumed_at_page": page}
+                )
         page_size = int(request.get("page_size", 50))
         method = str(request.get("method") or "GET").upper()
         records_path = str(request.get("records_path") or "data.records")
@@ -388,6 +423,8 @@ async def _crawl_public_api_platform(
         reported_page_count: int | None = None
         records_seen = 0
         empty_page = False
+        consecutive_unchanged_pages = 0
+        incremental_stop_after = int(getattr(settings, "incremental_unchanged_pages", 2))
 
         while True:
             if cancel_check is not None and cancel_check():
@@ -534,6 +571,7 @@ async def _crawl_public_api_platform(
                         collection.expected_count = reported_total
                 if page_count_path and reported_page_count is None:
                     reported_page_count = _as_int(_api_value(response_json, page_count_path))
+                page_changes = 0
                 for extracted_item in extracted.items:
                     item_state = repository.get_or_create_url(
                         platform_id=platform.id,
@@ -555,11 +593,36 @@ async def _crawl_public_api_platform(
                     platform_run.items_seen += 1
                     platform_run.items_new += int(event == "added")
                     platform_run.items_updated += int(event in {"updated", "recovered"})
+                    page_changes += int(event != "unchanged")
+                if page == configured_page_start:
+                    first_page_checks.append(
+                        {
+                            "collection": collection.code,
+                            "requested_page": page,
+                            "record_count": len(raw_records),
+                            "raw_records_sha256": sha256_text(json_dumps(raw_records)),
+                            "first_source_ids": [item.external_id for item in extracted.items[:10]],
+                            "snapshot_id": snapshot.id,
+                        }
+                    )
+                if page_changes == 0:
+                    consecutive_unchanged_pages += 1
+                else:
+                    consecutive_unchanged_pages = 0
                 records_seen += len(raw_records)
                 platform_run.urls_discovered = attempts
                 session.commit()
                 if not raw_records:
                     empty_page = True
+                    break
+                if not full and consecutive_unchanged_pages >= incremental_stop_after:
+                    incremental_stops.append(
+                        {
+                            "collection": collection.code,
+                            "stopped_at_page": page,
+                            "consecutive_unchanged_pages": consecutive_unchanged_pages,
+                        }
+                    )
                     break
                 if reported_total is not None and records_seen >= reported_total:
                     break
@@ -648,21 +711,27 @@ async def _crawl_public_api_platform(
         ):
             collection.expected_count = collection_observed
             inferred_collection_counts.append(collection_observed)
-        is_complete = (
-            collection.expected_count is not None
-            and collection_observed >= collection.expected_count
-            and errors == 0
-            and not hit_limit
-            and not was_cancelled
-        )
-        collection.coverage_status = "complete" if is_complete else "partial"
+        is_complete = collection.coverage_status == "complete"
+        if full:
+            is_complete = (
+                collection.expected_count is not None
+                and collection_observed >= collection.expected_count
+                and errors == 0
+                and not hit_limit
+                and not was_cancelled
+            )
+            collection.coverage_status = "complete" if is_complete else "partial"
         collection.last_run_at = _utcnow()
         if is_complete:
             collection.last_complete_at = _utcnow()
         collection_checks.append(is_complete)
     expected_counts = [collection.expected_count for collection in collections if collection.expected_count is not None]
     coverage_complete = bool(collection_checks) and all(collection_checks)
-    retired = repository.reconcile_missing_items(run=run, platform=platform, coverage_complete=coverage_complete)
+    retired = repository.reconcile_missing_items(
+        run=run,
+        platform=platform,
+        coverage_complete=bool(full and coverage_complete),
+    )
     platform_run.error_count = errors
     platform_run.observed_count = observed
     platform_run.expected_count = sum(expected_counts) if expected_counts else None
@@ -685,17 +754,20 @@ async def _crawl_public_api_platform(
         "collection_count_method": "public_api_total_or_full_scan_observed",
         "inferred_collection_counts": inferred_collection_counts,
         "retired_after_three_complete_scans": retired,
+        "first_page_checks": first_page_checks,
+        "resumed_collections": resumed_collections,
+        "incremental_stops": incremental_stops,
     })
-    if full:
-        scope_complete = bool(site_rule.get("all_catalogue_kinds_verified", False))
-        if coverage_complete and scope_complete:
-            platform.onboarding_status = "complete"
-        elif platform_run.status == "failed" and fetched == 0:
-            platform.onboarding_status = "offline"
-        else:
-            platform.onboarding_status = "blocked"
-            scope_note = str(site_rule.get("scope_note") or "公开数据产品目录已采集；其他栏目尚未完成公开分页核验")
-            platform.notes = f"{platform.notes or ''}；{scope_note}".strip("；")
+    if platform.source_role == "reference":
+        platform.onboarding_status = "out_of_scope"
+    elif observed > 0 and fetched > 0:
+        # Onboarding answers whether a usable public source has been connected.
+        # Coverage completeness remains a separate, stricter collection field.
+        platform.onboarding_status = "active"
+    elif full and platform_run.status == "failed" and fetched == 0:
+        platform.onboarding_status = "offline"
+    elif full:
+        platform.onboarding_status = "blocked"
     platform_run.finished_at = _utcnow()
     session.commit()
     return {
@@ -734,6 +806,7 @@ async def _crawl_platform(
             object_store=object_store,
             raw_retention_days=int(getattr(settings, "raw_retention_days", 365)),
             review_threshold=float(getattr(settings, "classification_review_threshold", 0.80)),
+            automatic_review=bool(getattr(settings, "automatic_classification_review", True)),
         )
         run = session.get(CrawlRun, run_id)
         platform = session.get(Platform, platform_id)
@@ -1223,6 +1296,7 @@ async def _crawl_platform(
                     object_store=object_store,
                     raw_retention_days=int(getattr(settings, "raw_retention_days", 365)),
                     review_threshold=float(getattr(settings, "classification_review_threshold", 0.80)),
+                    automatic_review=bool(getattr(settings, "automatic_classification_review", True)),
                 )
                 run = session.get(CrawlRun, run_id)
                 platform = session.get(Platform, platform_id)
@@ -1293,18 +1367,14 @@ async def _crawl_platform(
             "collections_total": len(collections),
             "retired_after_three_complete_scans": retired,
         })
-        if full:
-            if platform.source_role == "reference":
-                platform.onboarding_status = "out_of_scope"
-            elif coverage_complete:
-                platform.onboarding_status = "complete"
-            elif root_blocked:
-                platform.onboarding_status = "blocked"
-            elif fetched == 0:
-                platform.onboarding_status = "offline"
-            else:
-                platform.onboarding_status = "blocked"
-                platform.notes = (platform.notes or "") + "；全量扫描未完成栏目对账，已保留运行证据"
+        if platform.source_role == "reference":
+            platform.onboarding_status = "out_of_scope"
+        elif observed > 0 and fetched > 0:
+            platform.onboarding_status = "active"
+        elif full and root_blocked:
+            platform.onboarding_status = "blocked"
+        elif full and fetched == 0:
+            platform.onboarding_status = "offline"
         platform_run.finished_at = _utcnow()
         session.commit()
         return {

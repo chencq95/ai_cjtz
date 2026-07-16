@@ -10,7 +10,9 @@ import json
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from datetime import datetime, timezone
+
+from sqlalchemy import select, update
 
 from .database import init_database, session_factory, session_scope
 from .models import CatalogItemVersion, ClassificationReview
@@ -18,6 +20,32 @@ from .taxonomy import PRODUCT_TYPE_KEYWORDS
 
 
 ALLOWED_PRODUCT_TYPES = {value for value, _keywords in PRODUCT_TYPE_KEYWORDS} | {"other"}
+
+
+def auto_resolve_pending_reviews(settings: object) -> dict[str, int | str]:
+    """Resolve deterministic low-confidence proposals without a manual queue.
+
+    The normalized value has already been written by the source/taxonomy rules.
+    This operation records that the rule result was automatically accepted and
+    keeps a complete audit row without requiring an administrator click.
+    """
+
+    if not bool(getattr(settings, "automatic_classification_review", True)):
+        return {"status": "disabled", "processed": 0}
+    init_database(settings)
+    factory = session_factory(settings)
+    with session_scope(factory) as session:
+        result = session.execute(
+            update(ClassificationReview)
+            .where(ClassificationReview.status == "pending")
+            .values(
+                status="accepted",
+                reviewer="automatic_classifier",
+                reviewed_at=datetime.now(timezone.utc),
+                decision_note="automatic_rule_accept",
+            )
+        )
+        return {"status": "success", "processed": int(result.rowcount or 0)}
 
 
 def _json_object(content: str) -> dict[str, Any]:
