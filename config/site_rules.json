@@ -82,7 +82,7 @@
         "entry_url": "https://exchange.jsdataex.com/dc-detail/dc/getAllOnlineDcApiByDataNet",
         "enabled": true, "pagination_mode": "api",
         "request": {
-          "method": "POST", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 50,
+          "method": "POST", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 20,
           "payload": {"categoryNames": "", "dataProductClassification": "", "productFrom": null, "displayStatusList": "100,104,105,113", "industryZoneName": "", "regionalZoneName": "", "specialZoneName": ""},
           "records_path": "data.pageData", "total_path": "data.totalCount", "page_count_path": "data.totalPage", "success_field": "code", "success_values": [200]
         }
