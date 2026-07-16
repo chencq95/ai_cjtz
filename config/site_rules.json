@@ -11,7 +11,7 @@
         "request": {
           "method": "POST", "page_field": "pageNum", "page_size_field": "pageSize", "page_size": 100,
           "payload": {"searchName": "", "productType": "", "industry": null, "dataSourceRating": null, "viewCode": 1},
-          "records_path": "data.list", "success_field": "code", "success_values": [0],
+          "records_path": "data.list", "success_field": "code", "success_values": [0, 200],
           "headers": {"Referer": "https://webs.bjidex.com/sys-bsc-home/", "cityos-application-code": "icos-bip", "x-os-system-code": "icos-bip"},
           "detail_url_template": "https://webs.bjidex.com/sys-bsc-home/#/bscConsole/tradingMarket/{id}"
         }
@@ -79,12 +79,12 @@
     "collections": [
       {
         "code": "data-components", "name": "在线数据组件", "object_kind": "component",
-        "entry_url": "https://www.jsdataex.com/dc-detail/dc/getAllOnlineDcApiByDataNet",
+        "entry_url": "https://exchange.jsdataex.com/dc-detail/dc/getAllOnlineDcApiByDataNet",
         "enabled": true, "pagination_mode": "api",
         "request": {
           "method": "POST", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 50,
           "payload": {"categoryNames": "", "dataProductClassification": "", "productFrom": null, "displayStatusList": "100,104,105,113", "industryZoneName": "", "regionalZoneName": "", "specialZoneName": ""},
-          "records_path": "data.pageData", "total_path": "data.totalCount", "success_field": "code", "success_values": [200]
+          "records_path": "data.pageData", "total_path": "data.totalCount", "page_count_path": "data.totalPage", "success_field": "code", "success_values": [200]
         }
       }
     ]
@@ -112,7 +112,7 @@
         "request": {
           "method": "POST", "page_field": "pageNum", "page_size_field": "pageSize", "page_size": 50,
           "payload": {"dataDomain": "", "orderField": "publishTime", "sortOrder": "desc"},
-          "records_path": "data.list", "total_path": "data.total"
+          "records_path": "data.data.result", "total_path": "data.data.total", "success_field": "code", "success_values": [10000]
         }
       }
     ]
