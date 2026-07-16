@@ -47,18 +47,39 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 JSON_ALIASES: dict[str, tuple[str, ...]] = {
-    "name": ("productname", "goodsname", "dataname", "resourcename", "scenename", "componentname", "title", "name"),
-    "description": ("productdesc", "description", "describe", "introduction", "summary", "content", "remark"),
-    "provider": ("providername", "suppliername", "companyname", "orgname", "provider", "supplier"),
-    "product_type_raw": ("producttype", "goodstype", "datatype", "resourcetype", "deliverytype", "typeName"),
-    "industry_raw": ("industryname", "industry", "industrytype", "fieldname", "domain"),
-    "price_raw": ("price", "productprice", "listingprice", "charge", "fee"),
+    "name": (
+        "productname", "goodsname", "dataname", "resourcename", "scenename", "componentname",
+        "proresourcename", "cpmc", "servicename", "title", "name",
+    ),
+    "description": (
+        "productdesc", "productintroduction", "detailedintroduction", "dataproductdesc",
+        "proresourcedesc", "briefintroduction", "introduce", "cpms", "descript",
+        "description", "describe", "introduction", "summary", "content", "remark",
+    ),
+    "provider": (
+        "providername", "suppliername", "suppliercompanyname", "providercompanyname",
+        "dataprovidername", "enterprisename", "publisher", "producername", "supplyname",
+        "companyname", "orgname", "provider", "supplier",
+    ),
+    "product_type_raw": (
+        "producttype", "producttypename", "goodstype", "goodsclassify", "datatype",
+        "dataproducttype", "data_service_type1_name", "proresourcetype", "fclassmc",
+        "fsubclassmc", "resourcetype", "deliverytype", "typename",
+    ),
+    "industry_raw": (
+        "industryname", "industry", "industrytype", "industrycategory", "sectorsname",
+        "yycjmc", "fieldname", "domain",
+    ),
+    "price_raw": ("price", "productprice", "displayprice", "totalprice", "prodprice", "amount", "listingprice", "charge", "fee"),
     "delivery_method": ("deliverymethod", "deliverytype", "servicemode", "deliverymode"),
-    "refresh_frequency": ("updatefrequency", "refreshfrequency", "updatecycle", "frequency"),
-    "published_at": ("publishtime", "publishdate", "releasedate", "shelftime", "createdat", "createtime"),
-    "source_updated_at": ("updatetime", "updatedat", "modifytime", "lastmodified"),
+    "refresh_frequency": ("updatefrequency", "refreshfrequency", "updatecycle", "datafrequency", "frequency"),
+    "published_at": ("publishtime", "publishdate", "releasedate", "shelftime", "launchdate", "uptime", "createdat", "createtime"),
+    "source_updated_at": ("updatetime", "updatedat", "updatedate", "modifytime", "lastmodified"),
     "region_raw": ("regionname", "region", "coveragearea", "servicearea", "areaName"),
-    "external_id": ("productid", "goodsid", "resourceid", "sceneid", "componentid", "dataid", "id", "code"),
+    "external_id": (
+        "productid", "goodsid", "resourceid", "proresourceid", "sceneid", "componentid",
+        "componentcode", "productcode", "goodsCode", "dataid", "id", "uuid", "code",
+    ),
     "tags": ("tags", "taglist", "keywords", "labels"),
 }
 

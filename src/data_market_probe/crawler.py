@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import heapq
 import io
 import json
@@ -12,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
 from sqlalchemy import func, or_, select
@@ -46,6 +47,10 @@ from .utils import canonicalize_url, json_dumps, normalize_text, registrable_hos
 
 
 logger = logging.getLogger(__name__)
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SITE_RULES = ROOT / "config" / "site_rules.json"
 
 
 @dataclass(order=True, slots=True)
@@ -124,6 +129,73 @@ def _extract_result(result: FetchResult, platform: Platform) -> ExtractedPage:
     )
 
 
+def _load_site_rules() -> dict[str, Any]:
+    """Read the versioned, operator-audited source registry defensively."""
+
+    try:
+        payload = json.loads(SITE_RULES.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _api_value(payload: Any, path: str) -> Any:
+    """Return a dot-path value from a documented public API response."""
+
+    value = payload
+    for segment in (part for part in path.split(".") if part):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(segment)
+    return value
+
+
+def _as_int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_api_placeholders(value: Any) -> Any:
+    """Resolve the small, documented dynamic values allowed in API specs."""
+
+    if value == "$now_ms":
+        return int(_utcnow().timestamp() * 1_000)
+    if isinstance(value, dict):
+        return {key: _resolve_api_placeholders(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_resolve_api_placeholders(child) for child in value]
+    return value
+
+
+def _api_page_url(endpoint: str, page: int) -> str:
+    """Give each API page an auditable, unique URL-state identity."""
+
+    parts = urlsplit(endpoint)
+    query = parts.query
+    marker = urlencode({"_dmp_page": page})
+    query = f"{query}&{marker}" if query else marker
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
+
+
+def _apply_collection_kind(extracted: ExtractedPage, collection: SourceCollection | None) -> None:
+    """A declared collection boundary is stronger than a generic URL heuristic."""
+
+    if collection is None or collection.object_kind == "mixed":
+        return
+    for item in extracted.items:
+        item.kind = collection.object_kind
+
+
+def _apply_api_detail_template(extracted: ExtractedPage, template: str) -> None:
+    if not template:
+        return
+    for item in extracted.items:
+        if item.external_id:
+            item.source_url = template.format(id=item.external_id)
+
+
 def _page_role(url: str, anchor: str = "", mime: str = "") -> str:
     value = f"{url} {anchor}".lower()
     if "json" in mime or "/api/" in value:
@@ -200,6 +272,12 @@ async def _process_capture(
         page_role="api" if "network" in capture.method else "listing",
     )
     extracted = _extract_result(capture, platform)
+    _apply_collection_kind(
+        extracted,
+        repository.session.get(SourceCollection, collection_id)
+        if collection_id is not None
+        else None,
+    )
     snapshot, changed = repository.save_snapshot(
         state=state,
         run=run,
@@ -238,6 +316,401 @@ async def _process_capture(
         platform_run.items_seen += 1
         platform_run.items_new += int(event == "added")
         platform_run.items_updated += int(event in {"updated", "recovered"})
+
+
+async def _crawl_public_api_platform(
+    *,
+    settings: object,
+    session: Any,
+    repository: CatalogRepository,
+    run: CrawlRun,
+    platform: Platform,
+    platform_run: PlatformRun,
+    collections: list[SourceCollection],
+    site_rule: dict[str, Any],
+    fetcher: HttpFetcher,
+    fetch_semaphore: asyncio.Semaphore,
+    allowed_families: set[str],
+    full: bool,
+    max_pages: int,
+    cancel_check: Callable[[], bool] | None,
+) -> dict[str, Any]:
+    """Crawl documented public JSON catalogues with explicit pagination rules.
+
+    The historical notebook used one-off requests per exchange.  This adapter
+    converts those public, repeatable request contracts into a common flow
+    that retains raw evidence, honours robots/TLS/rate limits, writes stable
+    versions, and never silently treats an empty or malformed response as a
+    complete catalogue.
+    """
+
+    collection_by_code = {collection.code: collection for collection in collections}
+    attempts = fetched = errors = 0
+    root_blocked = False
+    hit_limit = False
+    was_cancelled = False
+    collection_failures: list[str] = []
+
+    for configured in site_rule.get("collections", []):
+        if cancel_check is not None and cancel_check():
+            was_cancelled = True
+            break
+        if not isinstance(configured, dict):
+            continue
+        request = configured.get("request")
+        if not isinstance(request, dict):
+            continue
+        collection = collection_by_code.get(str(configured.get("code") or ""))
+        if collection is None or not collection.enabled:
+            continue
+        endpoint = canonicalize_url(str(collection.entry_url or ""))
+        if not endpoint:
+            errors += 1
+            collection_failures.append(f"{collection.code}: API endpoint is empty")
+            continue
+        page_field = str(request.get("page_field") or "pageNo")
+        page_size_field = str(request.get("page_size_field") or "pageSize")
+        page = int(request.get("page_start", 1))
+        page_size = int(request.get("page_size", 50))
+        method = str(request.get("method") or "GET").upper()
+        records_path = str(request.get("records_path") or "data.records")
+        total_path = str(request.get("total_path") or "")
+        page_count_path = str(request.get("page_count_path") or "")
+        success_field = str(request.get("success_field") or "")
+        expected_success = request.get("success_values")
+        success_values = set(expected_success) if isinstance(expected_success, list) else set()
+        headers = {
+            str(key): str(value)
+            for key, value in (request.get("headers") or {}).items()
+        }
+        detail_template = str(request.get("detail_url_template") or "")
+        reported_total: int | None = None
+        reported_page_count: int | None = None
+        records_seen = 0
+        empty_page = False
+
+        while True:
+            if cancel_check is not None and cancel_check():
+                was_cancelled = True
+                break
+            if attempts >= max_pages:
+                hit_limit = True
+                break
+            attempts += 1
+            payload = _resolve_api_placeholders(copy.deepcopy(request.get("payload") or {}))
+            params = _resolve_api_placeholders(copy.deepcopy(request.get("params") or {}))
+            if method == "POST":
+                payload[page_field] = page
+                payload[page_size_field] = page_size
+                for alias in request.get("page_alias_fields") or []:
+                    payload[str(alias)] = page
+            else:
+                params[page_field] = page
+                params[page_size_field] = page_size
+                for alias in request.get("page_alias_fields") or []:
+                    params[str(alias)] = page
+            state_url = _api_page_url(endpoint, page)
+            state = repository.get_or_create_url(
+                platform_id=platform.id,
+                collection_id=collection.id,
+                url=state_url,
+                discovered_from=endpoint,
+                anchor_text=collection.name,
+                depth=0,
+                page_role="api",
+            )
+            try:
+                async with fetch_semaphore:
+                    response = await fetcher.fetch_api(
+                        endpoint,
+                        allowed_families=allowed_families,
+                        method=method,
+                        params=params,
+                        json_body=payload,
+                        headers=headers,
+                    )
+                state.robots_allowed = True
+                if response.status_code >= 400:
+                    errors += 1
+                    state.http_status = response.status_code
+                    state.last_fetched_at = _utcnow()
+                    state.consecutive_errors += 1
+                    repository.record_error(
+                        run_id=run.id,
+                        platform_id=platform.id,
+                        collection_id=collection.id,
+                        url=state_url,
+                        stage="api_http_status",
+                        error=f"HTTP {response.status_code}",
+                        retryable=response.status_code in {408, 425, 429, 500, 502, 503, 504},
+                    )
+                    if response.status_code in {401, 403, 418, 451}:
+                        root_blocked = True
+                    collection_failures.append(f"{collection.code}: HTTP {response.status_code}")
+                    session.commit()
+                    break
+                try:
+                    response_json = json.loads(_decode(response))
+                except json.JSONDecodeError as exc:
+                    errors += 1
+                    repository.record_error(
+                        run_id=run.id,
+                        platform_id=platform.id,
+                        collection_id=collection.id,
+                        url=state_url,
+                        stage="api_json",
+                        error=exc,
+                        retryable=False,
+                    )
+                    collection_failures.append(f"{collection.code}: response is not JSON")
+                    session.commit()
+                    break
+                if success_field and success_values:
+                    success_value = _api_value(response_json, success_field)
+                    if success_value not in success_values:
+                        errors += 1
+                        message = _api_value(response_json, "message") or _api_value(response_json, "msg") or success_value
+                        repository.record_error(
+                            run_id=run.id,
+                            platform_id=platform.id,
+                            collection_id=collection.id,
+                            url=state_url,
+                            stage="api_business_status",
+                            error=f"{success_field}={success_value}: {message}",
+                            retryable=False,
+                        )
+                        collection_failures.append(f"{collection.code}: API returned {success_field}={success_value}")
+                        root_blocked = True
+                        session.commit()
+                        break
+                raw_records = _api_value(response_json, records_path)
+                if not isinstance(raw_records, list):
+                    errors += 1
+                    repository.record_error(
+                        run_id=run.id,
+                        platform_id=platform.id,
+                        collection_id=collection.id,
+                        url=state_url,
+                        stage="api_schema",
+                        error=f"records path {records_path!r} is not a list",
+                        retryable=False,
+                    )
+                    collection_failures.append(f"{collection.code}: records path changed")
+                    root_blocked = True
+                    session.commit()
+                    break
+                extracted = _extract_result(response, platform)
+                # Extract only the declared list boundary.  The full raw JSON
+                # is still stored in the snapshot, while nested metadata and
+                # taxonomy dictionaries cannot become phantom catalogue items.
+                extracted = extract_json(
+                    raw_records,
+                    state_url,
+                    platform_province=platform.province,
+                    platform_city=platform.city,
+                )
+                _apply_collection_kind(extracted, collection)
+                _apply_api_detail_template(extracted, detail_template)
+                snapshot, changed = repository.save_snapshot(
+                    state=state,
+                    run=run,
+                    status_code=response.status_code,
+                    final_url=state_url,
+                    mime_type=response.mime_type,
+                    encoding=response.encoding,
+                    headers=response.headers,
+                    raw_body=response.body,
+                    extracted=extracted,
+                    fetch_method=response.method,
+                    truncated=response.truncated,
+                )
+                state.next_fetch_at = _due_at("api", changed, full)
+                fetched += 1
+                platform_run.pages_fetched += 1
+                platform_run.pages_changed += int(changed)
+                if total_path and reported_total is None:
+                    reported_total = _as_int(_api_value(response_json, total_path))
+                    if reported_total is not None and reported_total >= 0:
+                        collection.expected_count = reported_total
+                if page_count_path and reported_page_count is None:
+                    reported_page_count = _as_int(_api_value(response_json, page_count_path))
+                for extracted_item in extracted.items:
+                    item_state = repository.get_or_create_url(
+                        platform_id=platform.id,
+                        collection_id=collection.id,
+                        url=extracted_item.source_url or state.canonical_url,
+                        discovered_from=state.canonical_url,
+                        anchor_text=extracted_item.name,
+                        depth=1,
+                        page_role="detail",
+                    )
+                    _item, event = repository.upsert_item(
+                        platform=platform,
+                        collection_id=collection.id,
+                        source_state=item_state,
+                        run=run,
+                        snapshot=snapshot,
+                        extracted=extracted_item,
+                    )
+                    platform_run.items_seen += 1
+                    platform_run.items_new += int(event == "added")
+                    platform_run.items_updated += int(event in {"updated", "recovered"})
+                records_seen += len(raw_records)
+                platform_run.urls_discovered = attempts
+                session.commit()
+                if not raw_records:
+                    empty_page = True
+                    break
+                if reported_total is not None and records_seen >= reported_total:
+                    break
+                if reported_page_count is not None and page >= reported_page_count:
+                    break
+                if len(raw_records) < page_size:
+                    break
+                page += 1
+            except RobotsDenied as exc:
+                errors += 1
+                root_blocked = True
+                state.robots_allowed = False
+                repository.record_error(
+                    run_id=run.id,
+                    platform_id=platform.id,
+                    collection_id=collection.id,
+                    url=state_url,
+                    stage="robots",
+                    error=exc,
+                    retryable=False,
+                )
+                collection_failures.append(f"{collection.code}: robots denied")
+                session.commit()
+                break
+            except FetchFailure as exc:
+                errors += 1
+                state.consecutive_errors += 1
+                state.last_fetched_at = _utcnow()
+                state.next_fetch_at = _utcnow() + timedelta(hours=min(2 ** state.consecutive_errors, 24))
+                repository.record_error(
+                    run_id=run.id,
+                    platform_id=platform.id,
+                    collection_id=collection.id,
+                    url=state_url,
+                    stage=exc.stage,
+                    error=exc,
+                    retryable=exc.retryable,
+                )
+                if exc.stage in {"security", "api_config"}:
+                    root_blocked = True
+                collection_failures.append(f"{collection.code}: {exc.stage}")
+                session.commit()
+                break
+            except Exception as exc:
+                errors += 1
+                session.rollback()
+                repository.record_error(
+                    run_id=run.id,
+                    platform_id=platform.id,
+                    collection_id=collection.id,
+                    url=state_url,
+                    stage="api_processing",
+                    error=exc,
+                    retryable=False,
+                )
+                collection_failures.append(f"{collection.code}: processing error")
+                session.commit()
+                break
+        if was_cancelled or hit_limit:
+            break
+        if empty_page and records_seen == 0 and collection.expected_count not in {0, None}:
+            collection_failures.append(f"{collection.code}: declared total has no records")
+
+    observed = session.scalar(
+        select(func.count(CatalogItem.id)).where(
+            CatalogItem.platform_id == platform.id,
+            CatalogItem.status == "active",
+        )
+    ) or 0
+    collection_checks: list[bool] = []
+    inferred_collection_counts: list[int] = []
+    for collection in collections:
+        collection_observed = session.scalar(
+            select(func.count(CatalogItem.id)).where(
+                CatalogItem.collection_id == collection.id,
+                CatalogItem.status == "active",
+            )
+        ) or 0
+        if (
+            full
+            and collection.expected_count is None
+            and collection_observed > 0
+            and errors == 0
+            and not hit_limit
+            and not was_cancelled
+        ):
+            collection.expected_count = collection_observed
+            inferred_collection_counts.append(collection_observed)
+        is_complete = (
+            collection.expected_count is not None
+            and collection_observed >= collection.expected_count
+            and errors == 0
+            and not hit_limit
+            and not was_cancelled
+        )
+        collection.coverage_status = "complete" if is_complete else "partial"
+        collection.last_run_at = _utcnow()
+        if is_complete:
+            collection.last_complete_at = _utcnow()
+        collection_checks.append(is_complete)
+    expected_counts = [collection.expected_count for collection in collections if collection.expected_count is not None]
+    coverage_complete = bool(collection_checks) and all(collection_checks)
+    retired = repository.reconcile_missing_items(run=run, platform=platform, coverage_complete=coverage_complete)
+    platform_run.error_count = errors
+    platform_run.observed_count = observed
+    platform_run.expected_count = sum(expected_counts) if expected_counts else None
+    platform_run.coverage_status = "complete" if coverage_complete else ("blocked" if root_blocked and fetched == 0 else "partial")
+    platform_run.notes = "；".join(collection_failures[:12])
+    if was_cancelled:
+        platform_run.status = "cancelled"
+    elif root_blocked and fetched == 0:
+        platform_run.status = "blocked"
+    elif fetched == 0:
+        platform_run.status = "failed"
+    elif errors or hit_limit:
+        platform_run.status = "partial"
+    else:
+        platform_run.status = "success"
+    platform_run.completeness_json = json_dumps({
+        "coverage_complete": coverage_complete,
+        "page_limit_hit": hit_limit,
+        "collections_total": len(collections),
+        "collection_count_method": "public_api_total_or_full_scan_observed",
+        "inferred_collection_counts": inferred_collection_counts,
+        "retired_after_three_complete_scans": retired,
+    })
+    if full:
+        scope_complete = bool(site_rule.get("all_catalogue_kinds_verified", False))
+        if coverage_complete and scope_complete:
+            platform.onboarding_status = "complete"
+        elif platform_run.status == "failed" and fetched == 0:
+            platform.onboarding_status = "offline"
+        else:
+            platform.onboarding_status = "blocked"
+            scope_note = str(site_rule.get("scope_note") or "公开数据产品目录已采集；其他栏目尚未完成公开分页核验")
+            platform.notes = f"{platform.notes or ''}；{scope_note}".strip("；")
+    platform_run.finished_at = _utcnow()
+    session.commit()
+    return {
+        "platform_id": platform.id,
+        "name": platform.name,
+        "status": platform_run.status,
+        "coverage": platform_run.coverage_status,
+        "pages": platform_run.pages_fetched,
+        "items_seen": platform_run.items_seen,
+        "items_new": platform_run.items_new,
+        "items_updated": platform_run.items_updated,
+        "errors": errors,
+        "page_limit_hit": hit_limit,
+        "cancelled": was_cancelled,
+    }
 
 
 async def _crawl_platform(
@@ -284,7 +757,20 @@ async def _crawl_platform(
             session.commit()
             return {"platform_id": platform.id, "status": "no_url", "pages": 0, "items": 0, "errors": 0}
 
+        site_rule = _load_site_rules().get(str(platform.id), {})
+        if not isinstance(site_rule, dict):
+            site_rule = {}
         allowed_families = {domain_family(registrable_host(entry_url))}
+        # A small number of platform operators expose their public catalogue
+        # on a separately branded, documented API host (for example Fujian).
+        # Permit only hosts committed in this audited registry, still subject
+        # to the public-address and robots checks in HttpFetcher.
+        for configured in site_rule.get("collections", []):
+            if not isinstance(configured, dict):
+                continue
+            endpoint = canonicalize_url(str(configured.get("entry_url") or ""))
+            if endpoint:
+                allowed_families.add(domain_family(registrable_host(endpoint)))
         if not allowed_host_for_url(entry_url, allowed_families):
             repository.record_error(
                 run_id=run.id,
@@ -330,6 +816,23 @@ async def _crawl_platform(
                 collection.expected_count = None
                 collection.coverage_status = "unknown"
             session.flush()
+        if platform.adapter == "public-api-v1":
+            return await _crawl_public_api_platform(
+                settings=settings,
+                session=session,
+                repository=repository,
+                run=run,
+                platform=platform,
+                platform_run=platform_run,
+                collections=collections,
+                site_rule=site_rule,
+                fetcher=fetcher,
+                fetch_semaphore=fetch_semaphore,
+                allowed_families=allowed_families,
+                full=full,
+                max_pages=max_pages,
+                cancel_check=cancel_check,
+            )
         frontier: list[QueueEntry] = []
         enqueued: set[str] = set()
         visited: set[str] = set()
@@ -567,6 +1070,12 @@ async def _crawl_platform(
                         errors += 1
 
                 extracted = _extract_result(result, platform)
+                _apply_collection_kind(
+                    extracted,
+                    session.get(SourceCollection, entry.collection_id)
+                    if entry.collection_id is not None
+                    else None,
+                )
                 if entry.collection_id:
                     # A homepage/news paragraph can contain an unrelated
                     # “共 N 个”.  Only accept a source total from a listing,

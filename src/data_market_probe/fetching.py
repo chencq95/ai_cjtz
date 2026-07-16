@@ -193,6 +193,135 @@ class HttpFetcher:
                 raise FetchFailure(str(exc), retryable=False, stage="http") from exc
         raise FetchFailure(f"exhausted retries for {canonical}", retryable=True)
 
+    async def fetch_api(
+        self,
+        url: str,
+        *,
+        allowed_families: set[str],
+        method: str = "GET",
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> FetchResult:
+        """Fetch one documented public JSON endpoint.
+
+        API catalogues use both GET query pagination and POST JSON pagination.
+        Keep those requests inside the same public-host, robots, TLS, retry and
+        per-domain-rate-limit controls as ordinary pages.  The endpoint and
+        request shape come from the versioned source registry, never from a
+        page-controlled value.
+        """
+
+        canonical = canonicalize_url(url)
+        normalized_method = method.upper()
+        if normalized_method not in {"GET", "POST"}:
+            raise FetchFailure(f"unsupported public API method: {method}", stage="api_config")
+        if not canonical or not allowed_host_for_url(canonical, allowed_families):
+            raise FetchFailure(f"blocked non-public or off-family API URL: {url}", stage="security")
+        if not await self.allowed_by_robots(canonical, allowed_families):
+            raise RobotsDenied(canonical)
+
+        request_headers = {str(key): str(value) for key, value in (headers or {}).items()}
+        request_headers.setdefault("Accept", "application/json, text/plain, */*")
+        if normalized_method == "POST":
+            request_headers.setdefault("Content-Type", "application/json;charset=UTF-8")
+
+        retries = int(getattr(self.settings, "max_retries", 3))
+        backoff = float(getattr(self.settings, "retry_backoff_seconds", 2.0))
+        for attempt in range(retries + 1):
+            try:
+                result = await self._api_request(
+                    canonical,
+                    method=normalized_method,
+                    params=params or {},
+                    json_body=json_body,
+                    headers=request_headers,
+                    allowed_families=allowed_families,
+                )
+                if result.status_code in {408, 425, 429, 500, 502, 503, 504} and attempt < retries:
+                    retry_after = result.headers.get("retry-after", "")
+                    try:
+                        delay = min(float(retry_after), 120.0)
+                    except ValueError:
+                        delay = backoff * (2**attempt)
+                    await asyncio.sleep(delay)
+                    continue
+                return result
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+                if attempt >= retries:
+                    raise FetchFailure(str(exc), retryable=True, stage="network") from exc
+                await asyncio.sleep(backoff * (2**attempt))
+            except httpx.HTTPError as exc:
+                raise FetchFailure(str(exc), retryable=False, stage="http") from exc
+        raise FetchFailure(f"exhausted retries for public API {canonical}", retryable=True)
+
+    async def _api_request(
+        self,
+        url: str,
+        *,
+        method: str,
+        params: dict[str, Any],
+        json_body: dict[str, Any] | None,
+        headers: dict[str, str],
+        allowed_families: set[str],
+    ) -> FetchResult:
+        """Issue a bounded API request without following unvalidated redirects."""
+
+        current = url
+        current_method = method
+        current_json = json_body
+        for _redirect in range(6):
+            await self.rate_limiter.wait(current)
+            request_kwargs: dict[str, Any] = {"headers": headers}
+            if current_method == "GET":
+                request_kwargs["params"] = params
+            else:
+                request_kwargs["json"] = current_json or {}
+            async with self.client.stream(current_method, current, **request_kwargs) as response:
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("location")
+                    if not location:
+                        break
+                    target = canonicalize_url(current, location)
+                    if not target or not allowed_host_for_url(target, allowed_families):
+                        raise FetchFailure(
+                            f"blocked API redirect outside allowed public domain family: {target}",
+                            stage="security",
+                        )
+                    current = target
+                    # A 301/302/303 response can only be safely continued as
+                    # a GET.  Preserve POST only for RFC-preserving redirects.
+                    if response.status_code in {301, 302, 303}:
+                        current_method = "GET"
+                        current_json = None
+                    continue
+                chunks: list[bytes] = []
+                length = 0
+                truncated = False
+                async for chunk in response.aiter_bytes():
+                    remaining = self.max_bytes - length
+                    if remaining <= 0:
+                        truncated = True
+                        break
+                    chunks.append(chunk[:remaining])
+                    length += min(len(chunk), remaining)
+                    if len(chunk) > remaining:
+                        truncated = True
+                        break
+                content_type = response.headers.get("content-type", "")
+                return FetchResult(
+                    requested_url=url,
+                    final_url=str(response.url),
+                    status_code=response.status_code,
+                    headers={key.lower(): value for key, value in response.headers.items()},
+                    body=b"".join(chunks),
+                    mime_type=content_type.split(";", 1)[0].strip().lower(),
+                    encoding=response.encoding or "utf-8",
+                    method=f"http-api-{method.lower()}",
+                    truncated=truncated,
+                )
+        raise FetchFailure(f"too many API redirects for {url}", retryable=False)
+
     async def _request_with_redirects(
         self,
         url: str,

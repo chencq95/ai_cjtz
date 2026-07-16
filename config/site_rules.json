@@ -1,4 +1,94 @@
 {
+  "1": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "北京公开数据产品 API 已登记；数据组件、场景和数商栏目仍需分别核验。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://webs.bjidex.com/api/dstp/data-asset-server/dataProduct/deal/list",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "pageNum", "page_size_field": "pageSize", "page_size": 100,
+          "payload": {"searchName": "", "productType": "", "industry": null, "dataSourceRating": null, "viewCode": 1},
+          "records_path": "data.list", "success_field": "code", "success_values": [0],
+          "headers": {"Referer": "https://webs.bjidex.com/sys-bsc-home/", "cityos-application-code": "icos-bip", "x-os-system-code": "icos-bip"},
+          "detail_url_template": "https://webs.bjidex.com/sys-bsc-home/#/bscConsole/tradingMarket/{id}"
+        }
+      }
+    ]
+  },
+  "3": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "广州公开数据产品接口已登记；其他业务栏目需单独确认分页边界。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://www.cantonde.com/si/sjjy/list",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 100,
+          "payload": {"SORT": 0, "SSZQ": "5", "ISSW": 2, "KSRQ": "", "JSRQ": ""},
+          "records_path": "data"
+        }
+      }
+    ]
+  },
+  "4": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "浙江公开数据产品 API 已登记；组件、场景和数商目录需要另行栏目调查。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://ditm.zjdex.com/tsslapi/product/list/guest",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "pageNum", "page_size_field": "pageSize", "page_size": 50,
+          "payload": {"timestamp": "$now_ms", "orderQueryKey": "new_query_key"},
+          "records_path": "data.list", "page_count_path": "data.totalPage",
+          "headers": {"Referer": "https://ditm.zjdex.com/data-service/index"}
+        }
+      }
+    ]
+  },
+  "5": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "福建公开数据产品目录托管在已登记的 trade.fjbdex.com API；其他栏目尚未完成公开对账。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://trade.fjbdex.com/ltywpt-api/api/data-portal-center/portal/catentry/list",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "GET", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 100,
+          "params": {"labelId": "", "sceneId": "", "level": "", "sortType": "", "assetCategory": "", "dataType": "", "industryInvolved": "", "type": 3, "sort": ""},
+          "records_path": "result.records", "total_path": "result.total", "success_field": "success", "success_values": [true],
+          "headers": {"Referer": "https://trade.fjbdex.com/"},
+          "detail_url_template": "https://trade.fjbdex.com/#/portal/detail?id={id}"
+        }
+      }
+    ]
+  },
+  "7": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "江苏公开在线数据组件/产品目录已登记；站内其他栏目尚未完成公开分页核验。",
+    "collections": [
+      {
+        "code": "data-components", "name": "在线数据组件", "object_kind": "component",
+        "entry_url": "https://www.jsdataex.com/dc-detail/dc/getAllOnlineDcApiByDataNet",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 50,
+          "payload": {"categoryNames": "", "dataProductClassification": "", "productFrom": null, "displayStatusList": "100,104,105,113", "industryZoneName": "", "regionalZoneName": "", "specialZoneName": ""},
+          "records_path": "data.pageData", "total_path": "data.totalCount", "success_field": "code", "success_values": [200]
+        }
+      }
+    ]
+  },
   "8": {
     "adapter": "hubei-public-v1",
     "render_mode": "browser",
@@ -10,6 +100,50 @@
       {"code": "providers", "name": "数商生态", "object_kind": "provider", "entry_url": "https://dex.hubei-data.com/ecology", "enabled": true, "pagination_mode": "browser"}
     ]
   },
+  "10": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "西部数据交易中心公开商品 API 已登记；访问限制或其他栏目变化会保留为运行证据。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据商品", "object_kind": "product",
+        "entry_url": "https://trade-operator.westdex.com.cn/dop/market/goods/list",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "pageNum", "page_size_field": "pageSize", "page_size": 50,
+          "payload": {"dataDomain": "", "orderField": "publishTime", "sortOrder": "desc"},
+          "records_path": "data.list", "total_path": "data.total"
+        }
+      }
+    ]
+  },
+  "11": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "山东公开商品目录的本地和外部来源均已登记；其他站内栏目尚待核验。",
+    "collections": [
+      {
+        "code": "data-products", "name": "本地数据商品", "object_kind": "product",
+        "entry_url": "https://www.sddep.com/server/product/noauth/sjjygoods/noauthList",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "GET", "page_field": "page", "page_size_field": "size", "page_start": 0, "page_size": 50,
+          "params": {"goodsType": "", "goodsClassify": "", "platSource": 0},
+          "records_path": "list", "total_path": "totalCount"
+        }
+      },
+      {
+        "code": "data-products-external", "name": "外部数据商品", "object_kind": "product",
+        "entry_url": "https://www.sddep.com/server/product/noauth/sjjygoods/noauthList",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "GET", "page_field": "page", "page_size_field": "size", "page_start": 0, "page_size": 50,
+          "params": {"goodsType": "", "goodsClassify": "", "platSource": 1},
+          "records_path": "list", "total_path": "totalCount"
+        }
+      }
+    ]
+  },
   "12": {
     "adapter": "anhui-public-v1",
     "render_mode": "browser",
@@ -17,6 +151,176 @@
       {"code": "data-products", "name": "数据产品", "object_kind": "product", "entry_url": "https://www.ahdexc.com/factorMarket", "enabled": true, "pagination_mode": "browser"},
       {"code": "data-demands", "name": "数据需求", "object_kind": "demand", "entry_url": "https://www.ahdexc.com/businessHall", "enabled": true, "pagination_mode": "browser"},
       {"code": "data-scenarios", "name": "特色专区与应用场景", "object_kind": "scenario", "entry_url": "https://www.ahdexc.com/specialZone", "enabled": true, "pagination_mode": "browser"}
+    ]
+  },
+  "13": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "湖南公开数据产品目录已登记；组件、场景、数商栏目需要另行发现和对账。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://s-gateway.hunandex.com/api/data-portal-center/portal/catentry/newList",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "GET", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 100,
+          "params": {"type": "", "sceneId": "", "labelId": "", "industryInvolved": "", "fwType": "", "tradeUserType": "", "sort": 1, "sortType": 0, "preference": 2},
+          "records_path": "result.records", "total_path": "result.total", "success_field": "success", "success_values": [true]
+        }
+      }
+    ]
+  },
+  "14": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "江西公开数据产品目录已登记；其余目录尚未通过单独分页对账。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://dex.jxggzyjy.cn/api/resource/searchProductByPage",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 50,
+          "payload": {"sort": "Default", "tags": [], "searchKey": ""},
+          "records_path": "data.list", "page_count_path": "data.totalPage", "success_field": "code", "success_values": [0]
+        }
+      }
+    ]
+  },
+  "15": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "北部湾公开商品 API 已登记；若 robots 禁止访问，系统会保留限制证据而不绕过。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据商品", "object_kind": "product",
+        "entry_url": "https://www.bbgdex.com:9003/prod-api/td/front/home2/productList",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "GET", "page_field": "pageNum", "page_size_field": "pageSize", "page_size": 50,
+          "params": {"goodsName": "", "productTypeList": "", "productIndustryList": "", "productLabelList": "", "hotFlagSortDesc": "", "upAmallFlagSortDesc": ""},
+          "records_path": "data.rows", "total_path": "data.total"
+        }
+      }
+    ]
+  },
+  "17": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "长春公开数据产品 API 已登记；若 TLS 或站点访问失败将保留原始错误证据。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://jiaoyi.ccdatacenter.cn/dmall/portal/v1.0/product/search",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 50,
+          "payload": {"keyword": "", "productType": "", "applicationScenario": [], "sortBy": "0", "free": ""},
+          "records_path": "data.list", "total_path": "data.total"
+        }
+      }
+    ]
+  },
+  "19": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "甘肃公开数据产品 API 已登记；若 TLS 或访问限制持续存在将记录为阻塞证据。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://sjjy.gsdep.cn/api/mall/index/products/list",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 50,
+          "payload": {"provinceCode": "620000", "areaCode": "", "orderBy": "order_count desc", "productName": ""},
+          "records_path": "data.list", "total_path": "data.total"
+        }
+      }
+    ]
+  },
+  "20": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "天津公开数据产品 API 已登记；组件、场景、需求和数商栏目尚需单独核验。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://exchange.datadmz.com:30101/api/product/dataMarket/selectProductList",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "pageNum", "page_size_field": "pageSize", "page_size": 100,
+          "payload": {"name": "", "listPlatform": "01", "dataSource": [], "useIndustry": [], "dataProductType": [], "sourcePlatform": []},
+          "records_path": "rows", "total_path": "total"
+        }
+      }
+    ]
+  },
+  "24": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "成都公开数据产品 API 已登记；其它站内目录仍需按栏目核验。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://www.cddataos.com/xs-api/data-element-portal/yy-api-product-new/page",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "current", "page_alias_fields": ["pageNo"], "page_size_field": "pageSize", "page_size": 100,
+          "payload": {"portal": 0}, "records_path": "content.records", "page_count_path": "content.pages",
+          "headers": {"Referer": "https://www.cddataos.com/data-operation-web/", "source": "operate"},
+          "detail_url_template": "https://www.cddataos.com/data-operation-web/detail/{id}"
+        }
+      }
+    ]
+  },
+  "25": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "郑州公开数据产品 API 已登记；其他栏目尚待分页和详情对账。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://market.zzbdex.com/data-deal-admin/frontDeskHomePage/frontPageProduct",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "POST", "page_field": "pageNum", "page_size_field": "pageSize", "page_size": 100,
+          "payload": {"sceneCode": "", "tags": "", "industryZone": "", "areaCode": "", "productType": "", "dataType": "", "orderType": 0, "orderByComprehensive": 1},
+          "records_path": "data.records", "total_path": "data.total", "success_field": "code", "success_values": [0]
+        }
+      }
+    ]
+  },
+  "26": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "杭州公开数据产品 API 已登记；其他类型目录尚未完成独立核验。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://mall.hzdex.cn/api/item/mall/search",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "GET", "page_field": "pageNo", "page_size_field": "pageSize", "page_size": 100,
+          "params": {"frontCategoryId": 20, "keyword": ""}, "records_path": "data.records", "total_path": "data.total",
+          "headers": {"Referer": "https://mall.hzdex.cn/data-exchange"}
+        }
+      }
+    ]
+  },
+  "27": {
+    "adapter": "public-api-v1",
+    "render_mode": "http",
+    "scope_note": "温州公开数据产品 API 已登记；其它栏目和详情页仍需单独核验。",
+    "collections": [
+      {
+        "code": "data-products", "name": "数据产品", "object_kind": "product",
+        "entry_url": "https://wzdex.com.cn/nlpt/data/exchange/v1/trade-mall/list",
+        "enabled": true, "pagination_mode": "api",
+        "request": {
+          "method": "GET", "page_field": "page", "page_size_field": "limit", "page_size": 100,
+          "params": {"name": "", "productType": "", "industry": "", "scenarios": "", "dataSources": ""}, "records_path": "data"
+        }
+      }
     ]
   }
 }
